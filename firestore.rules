@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /sessions/{sessionId} {
+      allow read, write: if true;
+    }
+
+    match /test/{documentId} {
+      allow read: if true;
+    }
+
+    match /crypto_holdings/{holdingId} {
+      allow read, write: if true;
+    }
+
+    match /stock_holdings/{holdingId} {
+      allow read, write: if true;
+    }
+
+    match /forex_holdings/{holdingId} {
+      allow read, write: if true;
+    }
+
+    match /settings/{settingId} {
+      allow read, write: if true;
+    }
+
+    match /user_preferences/{prefId} {
+      allow read, write: if true;
+    }
+
+    match /storyboards/{storyboardId} {
+      allow read, write: if true;
+    }
+
+    match /travel_intell_reports/{reportId} {
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow read, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow update: if false;
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "entities": {
+    "Session": {
+      "title": "Session",
+      "description": "An interactive podcast and research session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "mediaItems": { "type": "array" },
+        "selectedMediaIds": { "type": "array" },
+        "history": { "type": "array" },
+        "suggestions": { "type": "array" }
+      }
+    },
+    "CryptoHolding": {
+      "title": "CryptoHolding",
+      "description": "User's crypto purchase records",
+      "type": "object",
+      "properties": {
+        "coinId": { "type": "string" },
+        "amount": { "type": "number" },
+        "buyPriceUsd": { "type": "number" },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["coinId", "amount", "buyPriceUsd"]
+    },
+    "StockHolding": {
+      "title": "StockHolding",
+      "description": "User's stock purchase records",
+      "type": "object",
+      "properties": {
+        "symbol": { "type": "string" },
+        "name": { "type": "string" },
+        "amount": { "type": "number" },
+        "buyPriceUsd": { "type": "number" },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["symbol", "amount", "buyPriceUsd"]
+    },
+    "ForexHolding": {
+      "title": "ForexHolding",
+      "description": "User's currency pair purchase records",
+      "type": "object",
+      "properties": {
+        "symbol": { "type": "string" },
+        "pair": { "type": "string" },
+        "amount": { "type": "number" },
+        "buyPrice": { "type": "number" },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["symbol", "pair", "amount", "buyPrice"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "Assistant settings and targets",
+      "type": "object",
+      "properties": {
+        "winTarget": { "type": "number" },
+        "winCurrency": { "type": "string" },
+        "customItems": { "type": "string" }
+      },
+      "required": ["winTarget", "winCurrency"]
+    },
+    "StoryboardProject": {
+      "title": "StoryboardProject",
+      "description": "A cinematic storyboard project containing slides and configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "aspectRatio": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "userId": { "type": "string" },
+        "slides": { "type": "array" }
+      },
+      "required": ["id", "name", "slides"]
+    }
+  },
+  "firestore": {
+    "sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "User sessions and logs"
+    },
+    "crypto_holdings/{holdingId}": {
+      "schema": "CryptoHolding",
+      "description": "User crypto asset portfolio"
+    },
+    "stock_holdings/{holdingId}": {
+      "schema": "StockHolding",
+      "description": "User stock asset portfolio"
+    },
+    "forex_holdings/{holdingId}": {
+      "schema": "ForexHolding",
+      "description": "User forex currency pair asset portfolio"
+    },
+    "settings/{settingId}": {
+      "schema": "Setting",
+      "description": "App settings values"
+    },
+    "storyboards/{storyboardId}": {
+      "schema": "StoryboardProject",
+      "description": "User cinematic storyboard projects"
+    },
+    "travel_intell_reports/{reportId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "timestamp": { "type": "number" },
+          "userId": { "type": "string" },
+          "type": { "type": "string" },
+          "analysis": { "type": "object" },
+          "sources": { "type": "array" }
+        },
+        "required": ["id", "timestamp", "type", "analysis"]
+      },
+      "description": "Durable Travel Intell reports"
+    }
+  }
+}

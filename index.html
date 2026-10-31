@@ -1,0 +1,106 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>15:30-Aggri-UPDATED-009-FORK9-July16-26</title>
+    <meta name="description" content="Gemini Media Aggregator & Creative Studio Suite with multi-modal workspaces, storyboarding, financial intelligence, and media editing." />
+    <meta property="og:title" content="15:30-Aggri-UPDATED-009-FORK9-July16-26" />
+    <meta property="og:description" content="Gemini Media Aggregator & Creative Studio Suite with multi-modal workspaces, storyboarding, financial intelligence, and media editing." />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              app: {
+                bg: 'var(--c-bg-app)',
+                panel: 'var(--c-bg-panel)',
+                card: 'var(--c-bg-card)',
+                input: 'var(--c-bg-input)',
+                border: 'var(--c-border)',
+                text: 'var(--c-text-main)',
+                muted: 'var(--c-text-muted)',
+                dim: 'var(--c-text-dim)',
+              },
+              slate: {
+                850: '#1e293b', // Legacy support
+              }
+            },
+            animation: {
+              'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'pulse-soft': 'pulseSoft 2s ease-in-out infinite',
+              'fade-in': 'fadeIn 0.3s ease-in-out',
+              'marquee': 'marquee 60s linear infinite',
+              'board-fade': 'boardFade 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
+              'board-slide': 'boardSlide 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: '0' },
+                '100%': { opacity: '1' },
+              },
+              marquee: {
+                '0%': { transform: 'translateX(0)' },
+                '100%': { transform: 'translateX(-50%)' },
+              },
+              pulseSoft: {
+                '0%, 100%': { opacity: '0.4' },
+                '50%': { opacity: '0.85' },
+              },
+              boardFade: {
+                '0%': { opacity: '0', transform: 'scale(0.98)' },
+                '100%': { opacity: '1', transform: 'scale(1)' },
+              },
+              boardSlide: {
+                '0%': { transform: 'translateX(100%)' },
+                '100%': { transform: 'translateX(0)' },
+              }
+            }
+          },
+        },
+      }
+    </script>
+    <style>
+      /* Custom scrollbar for webkit */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: var(--c-bg-app); 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--c-border); 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--c-text-dim); 
+      }
+
+      /* Base variables are now set by App.tsx logic, 
+         but we define defaults here to prevent FOUC */
+      :root {
+        --c-bg-app: #121212;
+        --c-bg-panel: #1a1a1a;
+        --c-bg-card: #262626;
+        --c-bg-input: #000000;
+        --c-border: #333333;
+        --c-text-main: #4ade80; 
+        --c-text-muted: #86efac;
+        --c-text-dim: #15803d;
+      }
+
+      .bg-dot-grid {
+        background-image: radial-gradient(circle, #333 1px, transparent 1px);
+        background-size: 20px 20px;
+      }
+    </style>
+    <link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-black text-app-text antialiased overflow-hidden h-screen transition-colors duration-300">
+    <div id="root" class="h-full"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

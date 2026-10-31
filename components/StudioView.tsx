@@ -1,0 +1,3556 @@
+import ToolOrderSettingsModal from './ToolOrderSettingsModal';
+import React, { useState, useEffect } from 'react';
+import { VoiceSettings, Session, MediaItem, PromptTemplate, CastMember } from '../types';
+import ArtifactPreview from './ArtifactPreview';
+import PromptLibraryModal from './PromptLibraryModal';
+import CastLibraryModal from './CastLibraryModal';
+import { useLanguage } from '../contexts/LanguageContext';
+import { Hero } from './CreationStudio/Hero';
+import { InputArea } from './CreationStudio/InputArea';
+import { LivePreview, Creation } from './CreationStudio/LivePreview';
+import { CreationHistory } from './CreationStudio/CreationHistory';
+import { AudioInput } from './AudioInput';
+import { StudioDatasheet } from './CreationStudio/StudioDatasheet';
+import { ImageCarverTool } from './CreationStudio/ImageCarverTool';
+import { GitHubPublisherTool } from './CreationStudio/GitHubPublisherTool';
+import { ProductResearchTool } from './CreationStudio/ProductResearchTool';
+import { SocialMediaSuite } from './CreationStudio/SocialMediaSuite';
+import { QuizAssessmentCreator } from './CreationStudio/QuizAssessmentCreator';
+import { ExecutiveBriefing } from './CreationStudio/ExecutiveBriefing';
+import { themeStyles } from '../constants/creativeStudioTheme';
+import { Brainstormer } from './CreationStudio/Brainstormer';
+import { EmailDrafter } from './CreationStudio/EmailDrafter';
+import { MarketingCopywriter } from './CreationStudio/MarketingCopywriter';
+import { SwotAnalysis } from './CreationStudio/SwotAnalysis';
+import { CodeExplainer } from './CreationStudio/CodeExplainer';
+import { EbookGenerator } from './CreationStudio/EbookGenerator';
+import { WebsiteBuilder } from './CreationStudio/WebsiteBuilder';
+import { CryptoTradingAssistant } from './crypto/CryptoTradingAssistant';
+import { StockTradingAssistant } from './crypto/StockTradingAssistant';
+import { CurrencyTradingAssistant } from './crypto/CurrencyTradingAssistant';
+import { bringToLife, generateResponse } from '../services/gemini';
+import { Upload, ChevronLeft } from 'lucide-react';
+
+interface StudioViewProps {
+  onBack: () => void;
+  voiceSettings: VoiceSettings;
+  onUpdateVoiceSettings: (settings: VoiceSettings) => void;
+  onRunTool: (toolId: string, payload?: any) => void;
+  isLoading: boolean;
+  hasActiveSession: boolean;
+  session?: Session | null;
+  sessions?: Session[];
+  previewCode: string | null;
+  onClosePreview: () => void;
+  generatedAudio: string | null;
+  onSaveAudio: (audioData: string, filename: string) => void;
+  onLoadAudio?: (item: MediaItem) => void;
+  onRemoveMediaItem?: (id: string) => void;
+  onRenameMediaItem?: (id: string, name: string) => void;
+  onRegenerate?: (newScript: string) => void;
+  prompts: PromptTemplate[];
+  onAddPrompt: (title: string, content: string) => void;
+  onDeletePrompt: (id: string) => void;
+  castLibrary: CastMember[];
+  onAddCastMember: (member: Omit<CastMember, 'id'>) => void;
+  onUpdateCastMember: (id: string, updates: Partial<CastMember>) => void;
+  onDeleteCastMember: (id: string) => void;
+  isCastLibraryOpen: boolean;
+  setIsCastLibraryOpen: (isOpen: boolean) => void;
+      onOpenMIPrOMPT?: () => void;
+  miprompts?: any[];
+  onAddMIPrOMPT?: (type: 'prB'|'ctB'|'txS', content: string, title?: string) => any;
+  onUpdateMIPrOMPT?: (id: string, updates: any) => void;
+  onDeleteMIPrOMPT?: (id: string) => void;
+  initialBuilderData?: {type: 'prB' | 'ctB' | 'txS', content: string} | null;
+  onClearInitialBuilderData?: () => void;
+  currentTheme?: string;
+  onSaveArtifact?: (item: MediaItem) => void;
+}
+
+
+const StudioView: React.FC<StudioViewProps> = ({
+  onBack,
+  currentTheme,
+  voiceSettings,
+  onUpdateVoiceSettings,
+  onRunTool,
+  isLoading,
+  hasActiveSession,
+  session,
+  sessions = [],
+  previewCode,
+  onClosePreview,
+  generatedAudio,
+  onSaveAudio,
+  onLoadAudio,
+  onRemoveMediaItem,
+  onRenameMediaItem,
+  onRegenerate,
+  prompts,
+  onAddPrompt,
+  onDeletePrompt,
+  castLibrary,
+  onAddCastMember,
+  onUpdateCastMember,
+  onDeleteCastMember,
+  isCastLibraryOpen,
+  setIsCastLibraryOpen,
+      onOpenMIPrOMPT,
+  miprompts = [],
+  onAddMIPrOMPT,
+  onUpdateMIPrOMPT,
+  onDeleteMIPrOMPT,
+  initialBuilderData,
+  onClearInitialBuilderData,
+  onSaveArtifact
+}) => {
+  const { t } = useLanguage();
+  const [localTheme, setLocalTheme] = useState<'charcoal' | 'silver' | 'white' | 'cosmic' | 'emerald' | 'amber' | 'cyberpunk' | 'slate' | 'crimson' | 'orchid' | 'olive'>(() => {
+    const saved = localStorage.getItem('creative_studio_theme') as any;
+    const allowed = ['charcoal', 'silver', 'white', 'cosmic', 'emerald', 'amber', 'cyberpunk', 'slate', 'crimson', 'orchid', 'olive'];
+    if (saved && allowed.includes(saved)) {
+      return saved;
+    }
+    return 'charcoal';
+  });
+
+  useEffect(() => {
+    const handleThemeChange = () => {
+      const saved = localStorage.getItem('creative_studio_theme') as any;
+      const allowed = ['charcoal', 'silver', 'white', 'cosmic', 'emerald', 'amber', 'cyberpunk', 'slate', 'crimson', 'orchid', 'olive'];
+      if (saved && allowed.includes(saved)) {
+        setLocalTheme(saved);
+      }
+    };
+    window.addEventListener('creative_studio_theme_change', handleThemeChange);
+    return () => {
+      window.removeEventListener('creative_studio_theme_change', handleThemeChange);
+    };
+  }, []);
+
+  const st = themeStyles[localTheme];
+
+  const availableVoices = [
+      { name: 'Puck', gender: 'Male', style: 'Deep', lang: 'English' },
+      { name: 'Charon', gender: 'Male', style: 'Deep', lang: 'English' },
+      { name: 'Kore', gender: 'Female', style: 'Calm', lang: 'English' },
+      { name: 'Fenrir', gender: 'Male', style: 'Intense', lang: 'English' },
+      { name: 'Zephyr', gender: 'Female', style: 'High', lang: 'English' },
+      { name: 'Aoede', gender: 'Female', style: 'Soft', lang: 'English' },
+      { name: 'Lars', gender: 'Male', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Fenrir' },
+      { name: 'Elena', gender: 'Female', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Zephyr' },
+      { name: 'Astrid', gender: 'Female', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Kore' },
+      { name: 'Oskar', gender: 'Male', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Puck' },
+      { name: 'Freja', gender: 'Female', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Aoede' },
+  ];
+
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [showHistory, setShowHistory] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [podcastCustomInput, setPodcastCustomInput] = useState('');
+  const [podcastIncludeSessionData, setPodcastIncludeSessionData] = useState(hasActiveSession);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [globalPodcastHistory, setGlobalPodcastHistory] = useState<MediaItem[]>([]);
+
+  useEffect(() => {
+    const loadGlobalHistory = () => {
+      try {
+        const saved = localStorage.getItem('global_podcast_history');
+        if (saved) {
+          setGlobalPodcastHistory(JSON.parse(saved));
+        } else {
+          setGlobalPodcastHistory([]);
+        }
+      } catch (err) {
+        console.error("Failed to load global podcast history:", err);
+      }
+    };
+
+    loadGlobalHistory();
+    window.addEventListener('global_podcast_history_updated', loadGlobalHistory);
+    return () => {
+      window.removeEventListener('global_podcast_history_updated', loadGlobalHistory);
+    };
+  }, []);
+
+  useEffect(() => {
+    setPodcastIncludeSessionData(hasActiveSession);
+  }, [hasActiveSession]);
+  const [editItemName, setEditItemName] = useState('');
+  const [showPrompts, setShowPrompts] = useState(false);
+  const [showBios, setShowBios] = useState(false);
+  const [selectedHostCastMemberId, setSelectedHostCastMemberId] = useState<string | null>(null);
+  const [selectedExpertCastMemberId, setSelectedExpertCastMemberId] = useState<string | null>(null);
+  const [selectedGuestCastMemberId, setSelectedGuestCastMemberId] = useState<string | null>(null);
+  const [hostGenderFilter, setHostGenderFilter] = useState<'All' | 'Male' | 'Female'>('All');
+  const [expertGenderFilter, setExpertGenderFilter] = useState<'All' | 'Male' | 'Female'>('All');
+  const [guestGenderFilter, setGuestGenderFilter] = useState<'All' | 'Male' | 'Female'>('All');
+
+  // Bring Anything To Life State
+  const [bringToLifeHistory, setBringToLifeHistory] = useState<Creation[]>([]);
+  const [activeCreation, setActiveCreation] = useState<Creation | null>(null);
+  const [isGeneratingCreation, setIsGeneratingCreation] = useState(false);
+  const [isCreationFocused, setIsCreationFocused] = useState(false);
+
+  // Load Bring Anything To Life History
+  useEffect(() => {
+    const saved = localStorage.getItem('bring_to_life_history');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setBringToLifeHistory(parsed.map((item: any) => ({
+          ...item,
+          timestamp: new Date(item.timestamp)
+        })));
+      } catch (e) {
+        console.error("Failed to load Bring Anything To Life history", e);
+      }
+    }
+  }, []);
+
+  // Save Bring Anything To Life History
+  useEffect(() => {
+    localStorage.setItem('bring_to_life_history', JSON.stringify(bringToLifeHistory));
+  }, [bringToLifeHistory]);
+
+  // Sync selection state with voice settings
+  useEffect(() => {
+    const isSwedish = voiceSettings.language === 'Swedish';
+    
+    // Check if current selection matches voice Settings
+    const currentHostCM = castLibrary.find(m => m.id === selectedHostCastMemberId);
+    if (voiceSettings.host && (!selectedHostCastMemberId || currentHostCM?.voice !== voiceSettings.host)) {
+      const match = castLibrary.find(m => {
+        if (isSwedish) {
+          return m.voice === voiceSettings.host && (m.id.includes('-sv-') || m.name.includes('Lars') || m.name.includes('Elena'));
+        }
+        return m.voice === voiceSettings.host && !m.id.includes('-sv-');
+      });
+      if (match) {
+        setSelectedHostCastMemberId(match.id);
+      } else {
+        setSelectedHostCastMemberId(null);
+      }
+    }
+    
+    const currentExpertCM = castLibrary.find(m => m.id === selectedExpertCastMemberId);
+    if (voiceSettings.expert && (!selectedExpertCastMemberId || currentExpertCM?.voice !== voiceSettings.expert)) {
+      const match = castLibrary.find(m => {
+        if (isSwedish) {
+          return m.voice === voiceSettings.expert && (m.id.includes('-sv-') || m.name.includes('Elena') || m.name.includes('Astrid'));
+        }
+        return m.voice === voiceSettings.expert && !m.id.includes('-sv-');
+      });
+      if (match) {
+        setSelectedExpertCastMemberId(match.id);
+      } else {
+        setSelectedExpertCastMemberId(null);
+      }
+    }
+    
+    const currentGuestCM = castLibrary.find(m => m.id === selectedGuestCastMemberId);
+    if (voiceSettings.guest && (!selectedGuestCastMemberId || currentGuestCM?.voice !== voiceSettings.guest)) {
+      const match = castLibrary.find(m => {
+        if (isSwedish) {
+          return m.voice === voiceSettings.guest && (m.id.includes('-sv-') || m.name.includes('Astrid') || m.name.includes('Oskar') || m.name.includes('Freja'));
+        }
+        return m.voice === voiceSettings.guest && !m.id.includes('-sv-');
+      });
+      if (match) {
+        setSelectedGuestCastMemberId(match.id);
+      } else {
+        setSelectedGuestCastMemberId(null);
+      }
+    }
+  }, [voiceSettings, castLibrary, selectedHostCastMemberId, selectedExpertCastMemberId, selectedGuestCastMemberId]);
+  
+  // Interactive Editing State
+  const [isEditingScript, setIsEditingScript] = useState(false);
+  const [scriptContent, setScriptContent] = useState('');
+
+  // YouTube Transcript State
+  const [ytLink, setYtLink] = useState('');
+  const [ytFile, setYtFile] = useState<File | null>(null);
+  const [ytDuration, setYtDuration] = useState('All');
+
+  const [summaryText, setSummaryText] = useState('');
+  const [summaryFile, setSummaryFile] = useState<File | null>(null);
+  const [summaryAction, setSummaryAction] = useState('summarize');
+  const [summaryLang, setSummaryLang] = useState('swedish');
+
+  // Independent Builder States
+  const [builderInput, setBuilderInput] = useState('');
+  const [builderSessionId, setBuilderSessionId] = useState<string>('none');
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+
+  const [builderProductType, setBuilderProductType] = useState('Online Course');
+  const [builderNiche, setBuilderNiche] = useState('Food & Beverage');
+  const [builderSkillLevel, setBuilderSkillLevel] = useState('');
+  const [builderPrimaryGoal, setBuilderPrimaryGoal] = useState('Education / Training');
+  const [builderSellingPlatform, setBuilderSellingPlatform] = useState('Own Website');
+  const [builderColorScheme, setBuilderColorScheme] = useState('Clean Minimalist');
+  const [builderPromotionStrategy, setBuilderPromotionStrategy] = useState('Influencer Sponsorships');
+  const [builderStep, setBuilderStep] = useState<1 | 2>(1);
+  const [showAdvancedTemplates, setShowAdvancedTemplates] = useState(false);
+  const [greyedConfigs, setGreyedConfigs] = useState<string[]>([]);
+  const [selectedCrypto, setSelectedCrypto] = useState('XRP');
+
+  // mIPrOMPT search and filter states
+  const [mipromptSearch, setMipromptSearch] = useState('');
+  const [mipromptFilter, setMipromptFilter] = useState<'all' | 'prB' | 'ctB' | 'txS'>('all');
+  const [copiedMipromptId, setCopiedMipromptId] = useState<string | null>(null);
+
+  // Spreadsheet Creator Presets and States
+  const SHEET_TEMPLATES = {
+    budget: {
+      name: 'Monthly Budget Tracker',
+      columns: ['Date', 'Category', 'Description', 'Income', 'Expense', 'Balance'],
+      rowGen: (i: number) => {
+        const cats = ['Salary', 'Rent', 'Groceries', 'Utilities', 'Subscriptions', 'Transport', 'Savings', 'Dining out'];
+        const cat = cats[i % cats.length];
+        const income = cat === 'Salary' ? (3000 + (i % 3) * 150) : 0;
+        const expense = cat === 'Salary' ? 0 : (40 + (i * 17) % 260);
+        const balance = 1000 + income - expense + (i * 23 % 400);
+        const date = new Date(2026, 0, 1 + i);
+        return [date.toISOString().slice(0,10), cat, `${cat} entry ${i+1}`, income ? `$${income}` : '$0', expense ? `$${expense}` : '$0', `$${balance}`];
+      }
+    },
+    content: {
+      name: 'Content Calendar',
+      columns: ['Date', 'Platform', 'Content type', 'Title', 'Status', 'Notes'],
+      rowGen: (i: number) => {
+        const platforms = ['Instagram', 'YouTube', 'TikTok', 'Blog', 'Newsletter', 'X'];
+        const types = ['Reel', 'Carousel', 'Short', 'Article', 'Email', 'Thread'];
+        const statuses = ['Idea', 'Drafting', 'In review', 'Scheduled', 'Published'];
+        const date = new Date(2026, 0, 1 + i * 2);
+        return [date.toISOString().slice(0,10), platforms[i % platforms.length], types[i % types.length], `Post idea #${i+1}`, statuses[i % statuses.length], 'Auto-generated placeholder'];
+      }
+    },
+    habit: {
+      name: 'Habit Tracker',
+      columns: ['Habit', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Streak'],
+      rowGen: (i: number) => {
+        const habits = ['Drink water', 'Exercise', 'Read 20 min', 'Meditate', 'Journal', 'No sugar', 'Walk 8k steps', 'Sleep by 11pm', 'Stretch', 'Plan tomorrow'];
+        const mark = () => (Math.random() > 0.35 ? '✓' : '–');
+        const row = [habits[i % habits.length]];
+        for (let d = 0; d < 7; d++) row.push(mark());
+        row.push(String((i * 3) % 14));
+        return row;
+      }
+    },
+    invoice: {
+      name: 'Invoice Template',
+      columns: ['Item', 'Description', 'Quantity', 'Unit price', 'Total'],
+      rowGen: (i: number) => {
+        const items = ['Design service', 'Consulting hour', 'Website template', 'Logo package', 'Social media kit', 'SEO audit', 'Copywriting', 'Video edit'];
+        const qty = 1 + (i % 4);
+        const price = 25 + (i * 15) % 200;
+        return [items[i % items.length], `${items[i % items.length]} - item ${i+1}`, String(qty), `$${price}`, `$${qty * price}`];
+      }
+    },
+    crm: {
+      name: 'Client CRM',
+      columns: ['Name', 'Email', 'Phone', 'Status', 'Last contact', 'Notes'],
+      rowGen: (i: number) => {
+        const names = ['Alex Carter', 'Priya Shah', 'Jordan Lee', 'Maria Gomez', 'Sam Patel', 'Chris Nguyen', 'Taylor Brooks', 'Jamie Reyes'];
+        const statuses = ['Lead', 'Contacted', 'Proposal sent', 'Negotiating', 'Won', 'Lost'];
+        const name = names[i % names.length];
+        const email = name.toLowerCase().replace(' ', '.') + '@example.com';
+        const date = new Date(2026, 0, 1 + i * 3);
+        return [name, email, `+1 555-01${String(10 + i).padStart(2,'0')}`, statuses[i % statuses.length], date.toISOString().slice(0,10), 'Auto-generated placeholder'];
+      }
+    },
+    meal: {
+      name: 'Weekly Meal Planner',
+      columns: ['Day', 'Breakfast', 'Lunch', 'Dinner', 'Snacks'],
+      rowGen: (i: number) => {
+        const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+        const b = ['Oatmeal & berries','Greek yogurt','Avocado toast','Smoothie','Eggs & toast','Pancakes','Fruit bowl'];
+        const l = ['Chicken salad','Veggie wrap','Quinoa bowl','Soup & bread','Sushi','Pasta salad','Grilled cheese'];
+        const d = ['Salmon & veggies','Stir fry','Tacos','Lentil curry','Pizza night','Roast chicken','Pasta'];
+        const s = ['Almonds','Fruit','Hummus & veg','Yogurt','Trail mix','Popcorn','Crackers'];
+        const idx = i % 7;
+        return [days[idx], b[idx], l[idx], d[idx], s[idx]];
+      }
+    }
+  };
+
+  const [sheetName, setSheetName] = useState('Monthly Budget Tracker');
+  const [sheetRows, setSheetRows] = useState(10);
+  const [sheetTemplate, setSheetTemplate] = useState('budget');
+  const [useSessionData, setUseSessionData] = useState(false);
+  const [sheetCustomPrompt, setSheetCustomPrompt] = useState('');
+  const [isGeneratingSheet, setIsGeneratingSheet] = useState(false);
+  const [spreadsheetResult, setSpreadsheetResult] = useState<{ columns: string[], rows: any[][], sheetName: string } | null>(null);
+  const [sheetSearch, setSheetSearch] = useState('');
+
+  const handleGenerateSpreadsheet = async () => {
+    setIsGeneratingSheet(true);
+    setSpreadsheetResult(null);
+
+    try {
+      const activeMediaItems = (useSessionData && session) ? session.mediaItems.filter(item => 
+        session.selectedMediaIds.includes(item.id)
+      ) : [];
+
+      // If they want to use session data OR they have a custom prompt instruction
+      if (useSessionData || sheetCustomPrompt.trim()) {
+        const sysPrompt = `You are an expert Data Analyst and spreadsheet model builder.
+Analyze the request and build a structured spreadsheet (columns and rows) containing realistic and useful data.
+User Instructions: ${sheetCustomPrompt || `Generate a spreadsheet using the ${sheetTemplate} template.`}
+Spreadsheet Name: ${sheetName}
+Number of Rows to generate: ${sheetRows}
+
+You MUST return ONLY a valid raw JSON object matching the following TypeScript schema. Do NOT wrap it in markdown code blocks like \`\`\`json, do NOT include any other text or explanation:
+{
+  "sheetName": "Descriptive Spreadsheet Name",
+  "columns": ["Col1", "Col2", "Col3", ...],
+  "rows": [
+    ["cell1a", "cell1b", "cell1c", ...],
+    ["cell2a", "cell2b", "cell2c", ...],
+    ...
+  ]
+}`;
+
+        const result = await generateResponse(sysPrompt, [], activeMediaItems, 'gemini-3.5-flash');
+        let cleanText = result.text.trim();
+        const codeBlockMatch = cleanText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (codeBlockMatch) {
+            cleanText = codeBlockMatch[1].trim();
+        }
+        
+        try {
+          const parsed = JSON.parse(cleanText);
+          if (parsed && Array.isArray(parsed.columns) && Array.isArray(parsed.rows)) {
+            setSpreadsheetResult({
+              sheetName: parsed.sheetName || sheetName,
+              columns: parsed.columns,
+              rows: parsed.rows
+            });
+            setIsGeneratingSheet(false);
+            return;
+          }
+        } catch (jsonErr) {
+          console.warn("JSON parsing of AI output failed, falling back to structured list parser", jsonErr);
+        }
+      }
+
+      // Offline fallback / Standard Template Generation
+      const template = SHEET_TEMPLATES[sheetTemplate as keyof typeof SHEET_TEMPLATES] || SHEET_TEMPLATES.budget;
+      const cols = template.columns;
+      const rows = [];
+      for (let i = 0; i < sheetRows; i++) {
+        rows.push(template.rowGen(i));
+      }
+      setSpreadsheetResult({
+        sheetName: sheetName || template.name,
+        columns: cols,
+        rows: rows
+      });
+
+    } catch (err) {
+      console.error("Spreadsheet generation failed", err);
+      alert("Error generating spreadsheet. Falling back to local template.");
+      const template = SHEET_TEMPLATES[sheetTemplate as keyof typeof SHEET_TEMPLATES] || SHEET_TEMPLATES.budget;
+      const cols = template.columns;
+      const rows = [];
+      for (let i = 0; i < sheetRows; i++) {
+        rows.push(template.rowGen(i));
+      }
+      setSpreadsheetResult({
+        sheetName: sheetName || template.name,
+        columns: cols,
+        rows: rows
+      });
+    } finally {
+      setIsGeneratingSheet(false);
+    }
+  };
+
+  const downloadCSV = () => {
+    if (!spreadsheetResult) return;
+    const { columns, rows, sheetName: name } = spreadsheetResult;
+
+    const escapeCsv = (val: any) => {
+      const s = String(val);
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    };
+
+    let csv = columns.map(escapeCsv).join(',') + '\n';
+    rows.forEach(row => {
+      csv += row.map(escapeCsv).join(',') + '\n';
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const filename = (name || 'spreadsheet').trim().replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.csv';
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+  
+  const importInputRef = React.useRef<HTMLInputElement>(null);
+
+  const productTypePresets = ['Online Course', 'E-Book / Guide', 'Membership Site', 'SaaS Software', 'Physical Product', 'Consulting / Coaching'];
+  const nichePresets = ['Health & Fitness', 'Personal Finance', 'Digital Marketing', 'Technology / SaaS', 'Self-Improvement', 'Real Estate', 'Food & Beverage', 'Travel & Lifestyle', 'Fashion & Apparel', 'Gaming & Esports', 'Education', 'Pet Care'];
+  const skillLevelPresets = ['Absolute Beginner', 'Intermediate', 'Advanced', 'Expert / Professional', 'All Levels', 'Corporate / Enterprise'];
+  const primaryGoalPresets = ['Lead Generation', 'Direct Sales', 'Brand Awareness', 'Audience Onboarding', 'Customer Retention', 'Education / Training'];
+  const sellingPlatformPresets = ['Shopify', 'Amazon FBA', 'WooCommerce', 'ClickFunnels', 'Gumroad', 'Own Website'];
+  const colorSchemePresets = ['Dark Mode & Neon', 'Clean Minimalist', 'Pastel & Playful', 'Earthy & Natural', 'High Contrast', 'Corporate Blue', 'Cyberpunk', 'Retro Vaporwave', 'Neumorphic Light', 'Monochrome & Serif', 'Vibrant Gradients', 'Midnight Purple'];
+  const promotionStrategyPresets = ['Meta / Facebook Ads', 'Organic SEO', 'TikTok Video', 'Email Marketing', 'Influencer Sponsorships', 'Affiliate Program'];
+
+  const advancedTemplatesArray = [
+      { id: 'adv_inv', name: 'Invoice generator', prompt: 'Build an interactive Invoice Generator that allows users to add items, calculate totals, and print or export the invoice.', isCustom: false },
+      { id: 'adv_cap', name: 'Caption / text writer', prompt: 'Act as a professional copywriter and generate engaging captions and text variations for social media.', isCustom: false },
+      { id: 'adv_tax', name: 'Tax Calculator', prompt: 'Build an interactive Tax Calculator that takes income and deductions to calculate estimated tax.', isCustom: false },
+      { id: 'adv_form', name: 'Form or app helper', prompt: 'Build a multi-step form or application helper with validation and progress tracking.', isCustom: false },
+      { id: 'adv_roi', name: 'ROI Calculator', prompt: 'Build an engaging ROI Calculator where users input costs and returns to visualize their profit margins.', isCustom: false },
+      { id: 'adv_prod', name: 'Offer / product desc', prompt: 'Act as a direct-response marketer and generate a compelling offer or product description.', isCustom: false },
+      { id: 'adv_doc', name: 'Doc / text summariser', prompt: 'Build a text summarization tool where users can paste long documents to get concise bulleted summaries.', isCustom: false }
+  ];
+
+  let promptTemplates = [
+      { id: 'p_eng', name: 'Software Engineer', prompt: 'Act as a Senior Software Engineer. Provide complete, maintainable, and well-documented code.' },
+      { id: 'p_copy', name: 'SEO Copywriter', prompt: 'Act as an expert SEO Copywriter. Produce high-converting, keyword-optimized content.' },
+      { id: 'p_pm', name: 'Project Manager', prompt: 'Act as an Agile Project Manager. Help break down tasks, write Jira tickets, and plan sprints.' },
+      { id: 'p_data', name: 'Data Analyst', prompt: 'Act as a Data Analyst. Write optimized SQL queries and explain complex data trends clearly.' },
+      { id: 'p_creative', name: 'Creative Director', prompt: 'Act as a Creative Director. Provide bold, innovative design ideas and brand strategies.' },
+      { id: 'p_tutor', name: 'Expert Tutor', prompt: 'Act as an Expert Tutor. Explain concepts using analogies, step-by-step logic, and check for understanding.' },
+      ...(miprompts?.filter(p => p.type === 'prB').map(p => ({ id: p.id, name: p.name.split('-').pop() || p.name, prompt: p.content, isCustom: true })) || [])
+  ];
+
+  let contentTemplates = [
+      { id: 'c_food', name: 'Food Planner App', prompt: 'Create a comprehensive weekly food planner component. It should include a 7-day grid showing Breakfast, Lunch, and Dinner. Add drag-and-drop support for meals, and a sidebar with a shopping list summary. Use React and Tailwind CSS.' },
+      { id: 'c_landing', name: 'SaaS Landing Page', prompt: 'Build a modern SaaS landing page with a hero section, feature grid, testimonials, and a pricing table.' },
+      { id: 'c_portfolio', name: 'Personal Portfolio', prompt: 'Build a sleek personal portfolio for a creative professional with a gallery, about section, and contact form.' },
+      { id: 'c_ecommerce', name: 'E-commerce Store', prompt: 'Build an e-commerce storefront with a product grid, shopping cart sidebar, and promotional banner.' },
+      { id: 'c_blog', name: 'Blog Magazine', prompt: 'Build a news/blog layout with a featured article section, recent posts grid, and a sidebar for categories.' },
+      { id: 'c_dashboard', name: 'Admin Dashboard', prompt: 'Build an admin dashboard with a side navigation menu, top header, status cards, and a data table.' },
+      { id: 'c_event', name: 'Event Page', prompt: 'Build an event registration page detailing schedule, speakers, location map placeholder, and a ticket form.' },
+      ...(miprompts?.filter(p => p.type === 'ctB').map(p => ({ id: p.id, name: p.name.split('-').pop() || p.name, prompt: p.content, isCustom: true })) || [])
+  ];
+
+  if (showAdvancedTemplates) {
+      promptTemplates = [...promptTemplates, ...advancedTemplatesArray.filter(t => ['adv_cap', 'adv_prod'].includes(t.id))];
+      contentTemplates = [...contentTemplates, ...advancedTemplatesArray.filter(t => !['adv_cap', 'adv_prod'].includes(t.id))];
+  }
+
+  useEffect(() => {
+      if (activeTool === 'content_builder' && !builderInput) {
+          const foodPlannerTemplate = contentTemplates.find(t => t.id === 'c_food');
+          if (foodPlannerTemplate) {
+              setBuilderInput(foodPlannerTemplate.prompt);
+              setSelectedTemplate('c_food');
+          }
+      }
+  }, [activeTool]);
+
+  const handleIndependentBuilderGenerate = (toolId: string) => {
+      if (!builderInput && builderSessionId === 'none') {
+          alert('Please provide instructions/topic or include data from a session.');
+          return;
+      }
+      onRunTool(toolId, { 
+          instruction: builderInput, 
+          builderSessionId: builderSessionId === 'none' ? undefined : builderSessionId, 
+          isIndependent: true,
+          productType: greyedConfigs.includes('product') ? '' : builderProductType,
+          niche: greyedConfigs.includes('niche') ? '' : builderNiche,
+          skillLevel: greyedConfigs.includes('skill') ? '' : builderSkillLevel,
+          primaryGoal: greyedConfigs.includes('goal') ? '' : builderPrimaryGoal,
+          sellingPlatform: greyedConfigs.includes('platform') ? '' : builderSellingPlatform,
+          colorScheme: greyedConfigs.includes('color') ? '' : builderColorScheme,
+          promotionStrategy: greyedConfigs.includes('promotion') ? '' : builderPromotionStrategy
+      });
+  };
+
+  useEffect(() => {
+    // Reset step when tool changes
+    setBuilderStep(1);
+  }, [activeTool]);
+
+  useEffect(() => {
+    if (initialBuilderData) {
+      if (initialBuilderData.type === 'prB') {
+        setActiveTool('prompt_builder');
+      } else if (initialBuilderData.type === 'ctB') {
+        setActiveTool('content_builder');
+      } else if (initialBuilderData.type === 'txS') {
+        setActiveTool('text_summarizer');
+      }
+      setBuilderInput(initialBuilderData.content);
+      setSelectedTemplate(null);
+      if (onClearInitialBuilderData) {
+        onClearInitialBuilderData();
+      }
+    }
+  }, [initialBuilderData, onClearInitialBuilderData]);
+
+  const handleGenerateTranscript = () => {
+      if (!ytLink && !ytFile) {
+          alert("Please provide a YouTube link or upload a video or audio file.");
+          return;
+      }
+      
+      if (ytFile) {
+          if (ytFile.size > 19 * 1024 * 1024) {
+              alert("File is too large for direct upload (max 19MB). Please use a YouTube link instead.");
+              return;
+          }
+          const reader = new FileReader();
+          reader.onload = (e) => {
+              const result = e.target?.result as string;
+              const base64Data = result.split(',')[1];
+              const mediaItem: MediaItem = {
+                  id: Math.random().toString(36).substring(7),
+                  name: ytFile.name,
+                  type: ytFile.type.startsWith('audio/') ? 'audio' : 'video',
+                  mimeType: ytFile.type,
+                  data: base64Data
+              };
+              onRunTool('youtube_transcript', { mediaItem, duration: ytDuration });
+          };
+          reader.readAsDataURL(ytFile);
+      } else {
+          const mediaItem: MediaItem = {
+              id: Math.random().toString(36).substring(7),
+              name: ytLink,
+              type: 'link',
+              mimeType: 'text/uri-list',
+              data: ytLink
+          };
+          onRunTool('youtube_transcript', { mediaItem, duration: ytDuration });
+      }
+  };
+
+  const handleGenerateSummary = () => {
+      if (!summaryText && !summaryFile) {
+          alert("Please provide text or upload a file.");
+          return;
+      }
+      
+      if (summaryFile) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+              const result = e.target?.result as string;
+              const base64Data = result.split(',')[1];
+              const mediaItem: MediaItem = {
+                  id: Math.random().toString(36).substring(7),
+                  name: summaryFile.name,
+                  type: 'document',
+                  mimeType: summaryFile.type || 'text/plain',
+                  data: base64Data
+              };
+              onRunTool('text_summarizer', { mediaItem, action: summaryAction, lang: summaryLang });
+          };
+          reader.readAsDataURL(summaryFile);
+      } else {
+          const mediaItem: MediaItem = {
+              id: Math.random().toString(36).substring(7),
+              name: 'Pasted Text',
+              type: 'text',
+              mimeType: 'text/plain',
+              data: btoa(unescape(encodeURIComponent(summaryText)))
+          };
+          onRunTool('text_summarizer', { mediaItem, action: summaryAction, lang: summaryLang });
+      }
+  };
+
+  const handleAvatarUpload = (role: 'host' | 'expert' | 'guest', file: File) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          const result = e.target?.result as string;
+          if (role === 'host') onUpdateVoiceSettings({ ...voiceSettings, hostAvatar: result });
+          if (role === 'expert') onUpdateVoiceSettings({ ...voiceSettings, expertAvatar: result });
+          if (role === 'guest') onUpdateVoiceSettings({ ...voiceSettings, guestAvatar: result });
+      };
+      reader.readAsDataURL(file);
+  };
+
+  const handleInteractiveEdit = () => {
+      if (!previewCode) return;
+      
+      // Extract text content from HTML preview code
+      // We can use a DOMParser to strip tags, but we want to preserve some structure if possible.
+      // However, for editing, raw text is best.
+      // The user can add "Host:", "Expert:" etc.
+      
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(previewCode, 'text/html');
+      
+      // We want to preserve newlines. innerText usually does this better than textContent.
+      // But we are in a virtual DOM environment, let's try to just get the body text.
+      // Actually, the previewCode has <div>s for each line.
+      // So we can select all divs and join their text content with newlines.
+      
+      const divs = doc.querySelectorAll('body > div > div');
+      let text = '';
+      if (divs.length > 0) {
+          divs.forEach(div => {
+              text += div.textContent + '\n\n';
+          });
+      } else {
+          // Fallback if structure is different
+          text = doc.body.innerText || doc.body.textContent || '';
+      }
+      
+      setScriptContent(text.trim());
+      setIsEditingScript(true);
+  };
+
+  const handleSaveScript = () => {
+      if (onRegenerate) {
+          onRegenerate(scriptContent);
+          setIsEditingScript(false);
+      }
+  };
+
+  // Handle Audio Playback
+  React.useEffect(() => {
+      if (generatedAudio && audioRef.current) {
+          audioRef.current.src = `data:audio/wav;base64,${generatedAudio}`;
+          audioRef.current.load();
+          audioRef.current.volume = volume;
+          // Auto-play when generated
+          audioRef.current.play().then(() => setIsPlaying(true)).catch(e => console.log("Autoplay blocked", e));
+      }
+  }, [generatedAudio]);
+
+  const togglePlay = () => {
+      if (!audioRef.current) return;
+      if (isPlaying) {
+          audioRef.current.pause();
+      } else {
+          audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+  };
+
+  const handleTimeUpdate = () => {
+      if (audioRef.current) {
+          setCurrentTime(audioRef.current.currentTime);
+          setDuration(audioRef.current.duration || 0);
+      }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const time = Number(e.target.value);
+      if (audioRef.current) {
+          audioRef.current.currentTime = time;
+          setCurrentTime(time);
+      }
+  };
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const vol = Number(e.target.value);
+      setVolume(vol);
+      if (audioRef.current) {
+          audioRef.current.volume = vol;
+      }
+  };
+
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveFilename, setSaveFilename] = useState('');
+
+  const handleDownload = () => {
+      setShowSaveModal(true);
+      setSaveFilename(`podcast_${new Date().getTime()}`);
+  };
+
+  const confirmDownload = () => {
+      if (!generatedAudio) return;
+      const link = document.createElement('a');
+      link.href = `data:audio/wav;base64,${generatedAudio}`;
+      link.download = `${saveFilename}.wav`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setShowSaveModal(false);
+  };
+
+  const handleSaveAsSource = () => {
+      if (!generatedAudio) return;
+      onSaveAudio(generatedAudio, saveFilename);
+      setShowSaveModal(false);
+  };
+
+  const formatTime = (time: number) => {
+      const min = Math.floor(time / 60);
+      const sec = Math.floor(time % 60);
+      return `${min}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  const handleFormatChange = (format: 'podcast_1' | 'podcast_2' | 'podcast_3') => {
+      // If we are already in the player view (previewCode exists), regenerate immediately
+      if (previewCode) {
+          onRunTool(format);
+      } else {
+          // Just run it (which switches to player view)
+          onRunTool(format);
+      }
+  };
+
+  const handleLengthChange = (len: string) => {
+      const newSettings = { ...voiceSettings, length: len as any };
+      onUpdateVoiceSettings(newSettings);
+      
+      // If we are already in the player view, regenerate immediately with new length
+      // We need to know the current format. 
+      // Since we don't store activeFormat in state, we can infer it or just default to podcast_1 if not tracked.
+      // Better to track activeFormat.
+  };
+  
+  // Track active format
+  const [activeFormat, setActiveFormat] = useState<'podcast_1' | 'podcast_2' | 'podcast_3'>('podcast_1');
+
+  const runFormat = (format: 'podcast_1' | 'podcast_2' | 'podcast_3') => {
+      setActiveFormat(format);
+      onRunTool(format);
+  };
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          const base64 = reader.result.split(',')[1];
+          resolve(base64);
+        } else {
+          reject(new Error('Failed to convert file to base64'));
+        }
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  const handleGenerateCreation = async (promptText: string, file?: File) => {
+    setIsGeneratingCreation(true);
+    setIsCreationFocused(true);
+    setActiveCreation(null);
+
+    try {
+      let imageBase64: string | undefined;
+      let mimeType: string | undefined;
+
+      if (file) {
+        imageBase64 = await fileToBase64(file);
+        mimeType = file.type.toLowerCase();
+      }
+
+      const html = await bringToLife(promptText, imageBase64, mimeType);
+      
+      if (html) {
+        const newCreation: Creation = {
+          id: Math.random().toString(36).substring(7),
+          name: file ? file.name : (promptText.substring(0, 20) || 'New Creation'),
+          html: html,
+          originalImage: imageBase64 && mimeType ? `data:${mimeType};base64,${imageBase64}` : undefined,
+          timestamp: new Date(),
+        };
+        setActiveCreation(newCreation);
+        setBringToLifeHistory(prev => [newCreation, ...prev]);
+      }
+
+    } catch (error: any) {
+      console.error("Failed to generate:", error);
+      alert(error.message || "An unexpected error occurred. Please try again.");
+      setIsCreationFocused(false);
+    } finally {
+      setIsGeneratingCreation(false);
+    }
+  };
+
+  const handleSelectCreation = (creation: Creation) => {
+    setActiveCreation(creation);
+    setIsCreationFocused(true);
+  };
+
+  const handleDeleteCreation = (id: string) => {
+    setBringToLifeHistory(prev => prev.filter(c => c.id !== id));
+    if (activeCreation && activeCreation.id === id) {
+      handleResetCreation();
+    }
+  };
+
+  const handleEditCreation = (id: string, newName: string) => {
+    setBringToLifeHistory(prev => prev.map(c => c.id === id ? { ...c, name: newName } : c));
+    if (activeCreation && activeCreation.id === id) {
+      setActiveCreation(prev => prev ? { ...prev, name: newName } : null);
+    }
+  };
+
+  const handleResetCreation = () => {
+    setActiveCreation(null);
+    setIsGeneratingCreation(false);
+    setIsCreationFocused(false);
+  };
+
+  const handleImportClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        try {
+            const json = event.target?.result as string;
+            const parsed = JSON.parse(json);
+            
+            if (parsed.html && parsed.name) {
+                const importedCreation: Creation = {
+                    ...parsed,
+                    timestamp: new Date(parsed.timestamp || Date.now()),
+                    id: parsed.id || Math.random().toString(36).substring(7)
+                };
+                
+                setBringToLifeHistory(prev => {
+                    const exists = prev.some(c => c.id === importedCreation.id);
+                    return exists ? prev : [importedCreation, ...prev];
+                });
+
+                setActiveCreation(importedCreation);
+                setIsCreationFocused(true);
+            } else {
+                alert("Invalid creation file format.");
+            }
+        } catch (err) {
+            console.error("Import error", err);
+            alert("Failed to import creation.");
+        }
+        if (importInputRef.current) importInputRef.current.value = '';
+    };
+    reader.readAsText(file);
+  };
+
+  // Set defaults on mount
+  React.useEffect(() => {
+      // Force defaults for "Solo monologue start interface"
+      onUpdateVoiceSettings({ ...voiceSettings, length: 'Short (1-2 min)' });
+      setActiveFormat('podcast_1');
+  }, []);
+
+  const defaultToolIds = ['bring_to_life', 'podcast_creator', 'prompt_builder', 'content_builder', 'youtube_transcript', 'text_summarizer', 'image_generator', 'product_research_tool', 'image_carver', 'github_publisher'];
+  const [toolOrder, setToolOrder] = React.useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('toolOrder_StudioView');
+      if (saved) {
+         const parsed = JSON.parse(saved);
+         if (parsed.length === defaultToolIds.length) return parsed;
+      }
+    } catch {}
+    return defaultToolIds;
+  });
+
+  const [isToolSettingsOpen, setIsToolSettingsOpen] = React.useState(false);
+
+  const handleHistoryItemClick = (item: MediaItem) => {
+      if (onLoadAudio) {
+          onLoadAudio(item);
+          setShowHistory(false);
+          // We need to switch to player view if not already there?
+          // Actually, generatedAudio change will trigger useEffect, but we need to show the player.
+          // The player is shown when `previewCode` is truthy OR `generatedAudio` is truthy?
+          // Wait, `StudioView` returns early if `previewCode` is truthy.
+          // But `generatedAudio` is used inside that block.
+          // If `previewCode` is null, we are in the tool selection view.
+          // So we need to set `previewCode` to something to show the player view.
+          // Or we can just show the player in the main view if audio is loaded.
+          // But the current design only shows player if `previewCode` is set (line 147).
+          // We should probably set a dummy previewCode or modify the condition.
+          // Let's set a dummy previewCode.
+          // But `previewCode` is passed from parent. We cannot set it directly.
+          // We need a callback to set previewCode in parent.
+          // `onRunTool` sets previewCode in parent.
+          // Maybe we can trigger a "load audio" tool action?
+          // Or just modify the condition in `StudioView` to show player if `generatedAudio` is present?
+          // But `generatedAudio` is present even when we go back to library? No, it's state in App.tsx.
+          // If we load audio, we want to see the player.
+          // Let's assume the user is already in the player view? No, they are in the creator view.
+          // If they click history, they want to listen to it.
+          // The player is inside the `if (previewCode)` block.
+          // This is a problem. The player is coupled with the preview code.
+          // I should probably move the player out or duplicate it, or force previewCode to be set.
+          // But `previewCode` is for the script. The history item doesn't have the script (unless we saved it).
+          // If we just want to play audio, we might need a standalone player or reuse the existing one.
+          // The existing one is nice.
+          // Let's see if we can trigger `onRunTool` with a special type that sets previewCode to a placeholder?
+          // Or just modify `App.tsx` to set `previewCode` when audio is loaded?
+          // But `onLoadAudio` is in `App.tsx`.
+          // Let's modify `onLoadAudio` in `App.tsx` to also set `previewCode`.
+          // But I already modified `App.tsx`. I don't want to modify it again if I can avoid it.
+          // Wait, `StudioView` has `onClosePreview`.
+          // If I change `if (previewCode)` to `if (previewCode || generatedAudio)`, then I can show the player.
+          // But `ArtifactPreview` needs `code`.
+          // If `previewCode` is null, `ArtifactPreview` will crash or show nothing.
+          // Let's check `ArtifactPreview`.
+          // It takes `code` prop.
+          // If I change the condition, I need to handle `previewCode` being null.
+          
+          // Alternative: The History button is in the Creator view (when `previewCode` is null).
+          // When clicked, it loads audio.
+          // If I load audio, I want to see the player.
+          // So I need to transition to the player view.
+          // The player view is controlled by `previewCode` in `App.tsx`.
+          // I should have updated `onLoadAudio` in `App.tsx` to set `previewCode` to "Audio Only" or something.
+          
+          // Let's modify `App.tsx` again to set `previewCode` when loading audio.
+          // This is the cleanest way to reuse the existing player UI.
+      }
+  };
+
+  if (previewCode) {
+      return (
+          <div className="h-full w-full bg-app-bg relative z-50 flex flex-col">
+              {/* Player Header / Controls */}
+              <div className="bg-app-panel border-b border-app-border p-4 flex flex-col gap-4 shadow-lg z-10">
+                  <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                          <button onClick={onClosePreview} className="p-2 hover:bg-app-card rounded-lg text-app-dim hover:text-app-text transition-colors">
+                              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
+                          </button>
+                          <h2 className="text-lg font-bold text-app-text flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${generatedAudio ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`}></span>
+                              {generatedAudio ? 'Now Playing' : 'Tool Result'}
+                          </h2>
+                      </div>
+                      
+                      {/* Quick Regenerate Controls - Only for Podcasts */}
+                      {activeTool === 'podcast_creator' && (
+                        <div className="flex items-center gap-2">
+                            {onRegenerate && (
+                                <button 
+                                    onClick={handleInteractiveEdit}
+                                    className="px-3 py-1 text-xs font-bold rounded bg-app-card border border-app-border hover:bg-app-text hover:text-app-bg transition-colors flex items-center gap-1 mr-2"
+                                    title="Edit script and regenerate audio"
+                                >
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                    {t('studio.interactiveEdit')}
+                                </button>
+                            )}
+                            <div className="flex bg-app-bg rounded-lg p-1 border border-app-border">
+                                <button onClick={() => runFormat('podcast_1')} className={`px-3 py-1 text-xs font-bold rounded transition-colors ${activeFormat === 'podcast_1' ? 'bg-emerald-500 text-white' : 'text-emerald-400 hover:bg-emerald-500/10'}`}>{t('studio.solo')}</button>
+                                <button onClick={() => runFormat('podcast_2')} className={`px-3 py-1 text-xs font-bold rounded transition-colors ${activeFormat === 'podcast_2' ? 'bg-blue-500 text-white' : 'text-blue-400 hover:bg-blue-500/10'}`}>{t('studio.duo')}</button>
+                                <button onClick={() => runFormat('podcast_3')} className={`px-3 py-1 text-xs font-bold rounded transition-colors ${activeFormat === 'podcast_3' ? 'bg-purple-500 text-white' : 'text-purple-400 hover:bg-purple-500/10'}`}>{t('studio.round')}</button>
+                            </div>
+                            <div className="w-px h-6 bg-app-border mx-1"></div>
+                            <div className="flex bg-app-bg rounded-lg p-1 border border-app-border">
+                                {['Short', 'Medium', 'Long'].map((l) => {
+                                    const fullLabel = l === 'Short' ? 'Short (1-2 min)' : l === 'Medium' ? 'Medium (3-5 min)' : 'Long (Deep Dive)';
+                                    const displayLabel = l === 'Short' ? t('studio.short') : l === 'Medium' ? t('studio.medium') : t('studio.long');
+                                    return (
+                                        <button 
+                                            key={l}
+                                            onClick={() => {
+                                                onUpdateVoiceSettings({ ...voiceSettings, length: fullLabel as any });
+                                                setTimeout(() => onRunTool(activeFormat), 100);
+                                            }} 
+                                            className={`px-3 py-1 text-xs font-bold rounded ${voiceSettings.length?.startsWith(l) ? 'bg-app-text text-app-bg' : 'text-app-dim hover:text-app-text'}`}
+                                        >
+                                            {displayLabel}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                      )}
+                  </div>
+
+                  {/* Audio Player UI - Only if audio exists */}
+                  {generatedAudio && (
+                    <div className="flex flex-col gap-2 bg-app-bg/50 p-3 rounded-xl border border-app-border animate-fade-in">
+                        <audio 
+                            ref={audioRef} 
+                            onTimeUpdate={handleTimeUpdate} 
+                            onEnded={() => setIsPlaying(false)}
+                            className="hidden"
+                        />
+                        
+                        <div className="flex items-center gap-4">
+                            <button 
+                                onClick={togglePlay}
+                                className="w-10 h-10 rounded-full bg-app-text text-app-bg flex items-center justify-center hover:scale-105 transition-transform shadow-lg shadow-app-text/20"
+                            >
+                                {isPlaying ? (
+                                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+                                ) : (
+                                    <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                )}
+                            </button>
+                            
+                            <div className="flex-1 flex flex-col justify-center">
+                                <input 
+                                    type="range" 
+                                    min="0" 
+                                    max={duration || 100} 
+                                    value={currentTime} 
+                                    onChange={handleSeek}
+                                    className="w-full h-1.5 bg-app-border rounded-lg appearance-none cursor-pointer accent-app-text"
+                                />
+                                <div className="flex justify-between text-[10px] text-app-dim mt-1 font-mono">
+                                    <span>{formatTime(currentTime)}</span>
+                                    <span>{formatTime(duration)}</span>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 group relative w-20 md:w-24">
+                                <svg className="w-4 h-4 text-app-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                </svg>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="1"
+                                    step="0.01"
+                                    value={volume}
+                                    onChange={handleVolumeChange}
+                                    className="w-full h-1 bg-app-border rounded-lg appearance-none cursor-pointer accent-app-text"
+                                />
+                            </div>
+
+                            <button 
+                                onClick={handleDownload}
+                                className="p-2 text-app-dim hover:text-app-text transition-colors"
+                                title="Download Audio"
+                            >
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                  )}
+                  
+                  {isLoading && (
+                      <div className="absolute inset-0 bg-app-panel/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
+                          <div className="w-10 h-10 border-4 border-app-text border-t-transparent rounded-full animate-spin mb-4"></div>
+                          <p className="text-app-text font-bold animate-pulse">Generating new audio...</p>
+                      </div>
+                  )}
+              </div>
+
+              {/* Script Preview */}
+              <div className="flex-1 overflow-hidden relative">
+                  <ArtifactPreview 
+                      code={previewCode} 
+                      onClose={onClosePreview} 
+                      isFullWidth={true}
+                      theme={currentTheme}
+                  />
+              </div>
+
+              {/* Save/Download Modal */}
+              {showSaveModal && (
+                  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                      <div className="bg-app-panel border border-app-border rounded-2xl p-6 w-full max-w-md shadow-2xl animate-scale-in">
+                          <h3 className="text-xl font-bold text-app-text mb-4">Save Audio</h3>
+                          <div className="space-y-4">
+                              <div>
+                                  <label className="block text-xs font-bold text-app-dim uppercase mb-1">Filename</label>
+                                  <input 
+                                      type="text" 
+                                      value={saveFilename}
+                                      onChange={(e) => setSaveFilename(e.target.value)}
+                                      className="w-full bg-app-bg border border-app-border rounded-lg p-3 text-app-text focus:border-app-text focus:outline-none"
+                                      placeholder="Enter filename..."
+                                      autoFocus
+                                  />
+                              </div>
+                              <div className="flex gap-3 pt-2">
+                                  <button 
+                                      onClick={confirmDownload}
+                                      className="flex-1 py-3 bg-app-text text-app-bg font-bold rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                                  >
+                                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                      </svg>
+                                      Download
+                                  </button>
+                                  <button 
+                                      onClick={handleSaveAsSource}
+                                      className="flex-1 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-500 transition-colors flex items-center justify-center gap-2"
+                                  >
+                                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                      </svg>
+                                      Add to Sources
+                                  </button>
+                              </div>
+                              <button 
+                                  onClick={() => setShowSaveModal(false)}
+                                  className="w-full py-2 text-app-dim hover:text-app-text text-sm font-bold"
+                              >
+                                  Cancel
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
+
+              {/* Interactive Edit Modal */}
+              {isEditingScript && (
+                  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                      <div className="bg-app-panel border border-app-border rounded-2xl p-6 w-full max-w-4xl h-[80vh] shadow-2xl animate-scale-in flex flex-col">
+                          <div className="flex items-center justify-between mb-4">
+                              <h3 className="text-xl font-bold text-app-text flex items-center gap-2">
+                                  <svg className="w-5 h-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                  Interactive Script Editor
+                              </h3>
+                              <button onClick={() => setIsEditingScript(false)} className="text-app-dim hover:text-app-text">
+                                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                              </button>
+                          </div>
+                          
+                          <div className="flex-1 bg-app-bg rounded-lg border border-app-border p-4 mb-4 overflow-hidden flex flex-col">
+                              <p className="text-xs text-app-dim mb-2">Edit the script below. You can add new speakers (e.g., "Guest: Hello") or modify existing dialogue.</p>
+                              <textarea 
+                                  value={scriptContent}
+                                  onChange={(e) => setScriptContent(e.target.value)}
+                                  className="flex-1 w-full bg-transparent text-app-text font-mono text-sm resize-none focus:outline-none custom-scrollbar leading-relaxed"
+                                  placeholder="Enter script here..."
+                              />
+                          </div>
+                          
+                          <div className="flex justify-end gap-3">
+                              <button 
+                                  onClick={() => setIsEditingScript(false)}
+                                  className="px-4 py-2 text-app-dim hover:text-app-text font-bold"
+                              >
+                                  Cancel
+                              </button>
+                              <button 
+                                  onClick={handleSaveScript}
+                                  className="px-6 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold rounded-lg shadow-lg shadow-purple-500/20 transition-all flex items-center gap-2"
+                              >
+                                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                  </svg>
+                                  Regenerate Audio
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
+          </div>
+      );
+  }
+
+  const tools = [
+    {
+      id: 'bring_to_life',
+      title: 'Bring Anything to Life',
+      description: 'Turn drawings, screenshots, or ideas into functional interactive code instantly.',
+      icon: (
+        <svg className="w-8 h-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      ),
+      color: 'bg-blue-500/10 border-blue-500/30 hover:border-blue-500',
+      disabled: false
+    },
+    {
+      id: 'podcast_creator',
+      title: 'Interactive Audio Podcast',
+      description: 'Create engaging audio conversations from your content.',
+      icon: (
+        <svg className="w-8 h-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+        </svg>
+      ),
+      color: 'bg-purple-500/10 border-purple-500/30 hover:border-purple-500',
+      disabled: false
+    },
+    {
+      id: 'prompt_builder',
+      title: 'Prompt Builder',
+      description: 'Create advanced system prompts for Large Language Models.',
+      icon: (
+        <svg className="w-8 h-8 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      ),
+      color: 'bg-yellow-500/10 border-yellow-500/30 hover:border-yellow-500',
+      disabled: false
+    },
+    {
+      id: 'content_builder',
+      title: 'Content Builder',
+      description: 'Comprehensive website code creator with 5 page buttons as navigation, built with stylish styling.',
+      icon: (
+        <svg className="w-8 h-8 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9.5a2.5 2.5 0 00-2.5-2.5H15M9 11l3 3L22 4" />
+        </svg>
+      ),
+      color: 'bg-orange-500/10 border-orange-500/30 hover:border-orange-500',
+      disabled: false
+    },
+    {
+      id: 'youtube_transcript',
+      title: 'YouTube Transcript Generator',
+      description: 'Generate transcripts from YouTube links or video file uploads.',
+      icon: (
+        <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+      color: 'bg-red-500/10 border-red-500/30 hover:border-red-500',
+      disabled: false
+    },
+    {
+      id: 'text_summarizer',
+      title: 'Text Summarizer & Translator',
+      description: 'Summarize text or file uploads and translate to/from Swedish.',
+      icon: (
+        <svg className="w-8 h-8 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      ),
+      color: 'bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500',
+      disabled: false
+    },
+    {
+      id: 'image_generator',
+      title: 'Image Generator Prompts',
+      description: 'Create detailed Prompts for AI image generators (Midjourney/DALL-E) from context.',
+      icon: (
+        <svg className="w-8 h-8 text-fuchsia-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+      ),
+      color: 'bg-fuchsia-500/10 border-fuchsia-500/30 hover:border-fuchsia-500',
+      disabled: !hasActiveSession
+    },
+    {
+      id: 'product_research_tool',
+      title: 'Product Research Tool',
+      description: 'Discover profitable digital product niches before competitors with trend analysis and demand scoring.',
+      icon: (
+        <svg className="w-8 h-8 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+      ),
+      color: 'bg-cyan-500/10 border-cyan-500/30 hover:border-cyan-500',
+      disabled: false
+    },
+    {
+      id: 'image_carver',
+      title: 'Image Carver',
+      description: 'Precision-crop and slice images into geometric grids.',
+      icon: (
+        <svg className="w-8 h-8 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+      ),
+      color: 'bg-sky-500/10 border-sky-500/30 hover:border-sky-500',
+      disabled: false
+    },
+    {
+      id: 'github_publisher',
+      title: 'Click 2 GitHub',
+      description: 'Drop a ZIP or folder and commit every file straight into a repository in one click.',
+      icon: (
+        <svg className="w-8 h-8 text-emerald-400" fill="currentColor" viewBox="0 0 16 16">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+        </svg>
+      ),
+      color: 'bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500',
+      disabled: false
+    }
+  ];
+
+  const defaultOrder = tools.map(t => t.id);
+
+  const orderedTools = [...tools].sort((a, b) => {
+    let indexA = toolOrder.indexOf(a.id);
+    let indexB = toolOrder.indexOf(b.id);
+    if (indexA === -1) indexA = 999;
+    if (indexB === -1) indexB = 999;
+    return indexA - indexB;
+  });
+
+  const handleSaveOrder = (newOrder: string[]) => {
+    setToolOrder(newOrder);
+    localStorage.setItem('toolOrder_StudioView', JSON.stringify(newOrder));
+  };
+
+  
+  const handlePodcastGenerate = () => {
+    // Determine which podcast tool to run based on settings or user choice
+    // For now, let's default to podcast_2 (2-person) or allow selection
+    // But the toolId in App.tsx is 'podcast_1', 'podcast_2', 'podcast_3'
+    // We can add a selector in the UI
+    
+    // For this interactive creator, let's assume we want to run the tool with the current voice settings
+    // We might need to pass the 'topic' as instructions if the tool supports it
+    // The current handleToolAction uses activeSession media. 
+    // If we want to support "Topic" input here, we might need to add a text item to the session first?
+    // Or update handleToolAction to accept a custom prompt/context.
+    
+    // For now, let's assume it uses the active session's content.
+    onRunTool('podcast_2'); 
+  };
+
+  return (
+    <div className={`flex flex-col h-full w-full overflow-y-auto animate-fade-in p-6 md:p-10 transition-colors duration-300 ${st.bg} ${st.text}`}>
+      {/* Header */}
+      <div className="max-w-7xl w-full mx-auto mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600 mb-2">
+            Creative Studio
+          </h1>
+          <p className={`${st.textDim} text-sm`}>
+            Advanced tools for content creation and synthesis.
+          </p>
+        </div>
+        
+        <div className="flex items-center gap-4">
+          {/* View Toggles */}
+          <div className={`flex items-center gap-1 p-1 border rounded-lg ${st.cardBg} ${st.border}`}>
+            <button
+              onClick={() => setViewMode(prev => prev === 'grid' ? 'list' : 'grid')}
+              className={`p-1.5 rounded-md transition-colors ${(st as any).innerBg ? (st as any).innerBg : 'bg-transparent'} ${st.text} shadow-sm`}
+              title="Toggle View Mode"
+            >
+              {viewMode === 'list' ? (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
+          </div>
+
+          {activeTool !== 'datasheet' && (
+            <button
+              onClick={() => setActiveTool('datasheet')}
+              className="px-4 py-2 bg-gradient-to-r from-teal-500/10 to-sky-500/10 hover:from-teal-500/20 hover:to-sky-500/20 border border-teal-500/20 hover:border-teal-500/40 rounded-lg text-teal-400 text-sm font-bold transition-all flex items-center gap-2 shadow-lg shadow-teal-500/5"
+              title="Open Studio Registry Datasheet"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span>Info</span>
+            </button>
+          )}
+
+          
+          
+
+          
+          <button
+             onClick={() => setIsToolSettingsOpen(true)}
+             className={`w-10 h-10 rounded-full border-2 transition-all duration-300 flex items-center justify-center hover:scale-110 active:scale-95 cursor-pointer ${st.btnInactive}`}
+             title="Tool Settings"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+
+          {/* Theme cycle button */}
+          <button
+            onClick={() => {
+              const themes = Object.keys(themeStyles) as Array<keyof typeof themeStyles>;
+              const nextIndex = (themes.indexOf(localTheme) + 1) % themes.length;
+              const nextTheme = themes[nextIndex];
+              setLocalTheme(nextTheme as any);
+              localStorage.setItem('creative_studio_theme', nextTheme);
+              window.dispatchEvent(new Event('creative_studio_theme_change'));
+            }}
+            className={`w-7 h-7 rounded-full border-2 transition-all duration-300 flex items-center justify-center hover:scale-110 active:scale-95 cursor-pointer ${
+              localTheme === 'charcoal' 
+                ? 'bg-zinc-900 border-zinc-600 shadow-md shadow-black/40' 
+                : localTheme === 'silver' 
+                ? 'bg-zinc-300 border-zinc-400 shadow-md shadow-zinc-500/20' 
+                : localTheme === 'white' 
+                ? 'bg-white border-zinc-300 shadow-md'
+                : localTheme === 'cosmic' 
+                ? 'bg-indigo-900 border-indigo-500 shadow-md shadow-indigo-950/50' 
+                : localTheme === 'emerald' 
+                ? 'bg-emerald-900 border-emerald-500 shadow-md shadow-emerald-950/50' 
+                : localTheme === 'amber' 
+                ? 'bg-amber-600 border-amber-500 shadow-md shadow-amber-950/50' 
+                : localTheme === 'cyberpunk' 
+                ? 'bg-fuchsia-900 border-cyan-400 shadow-md' 
+                : localTheme === 'slate' 
+                ? 'bg-slate-800 border-slate-500 shadow-md' 
+                : localTheme === 'crimson'
+                ? 'bg-rose-900 border-rose-500 shadow-md shadow-rose-950/50'
+                : localTheme === 'orchid'
+                ? 'bg-fuchsia-700 border-fuchsia-500 shadow-md shadow-fuchsia-950/50'
+                : 'bg-stone-700 border-stone-500 shadow-md shadow-stone-950/50'
+            }`}
+            title={`Cycle theme (current: ${localTheme})`}
+          />
+
+          <button 
+            onClick={onBack}
+            className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 rounded-lg transition-all active:scale-95 flex items-center gap-2 text-sm font-bold"
+            title="Back to Library"
+          >
+            <ChevronLeft className="w-5 h-5" />
+            Library
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="max-w-7xl w-full mx-auto relative">
+        
+        {/* Global Loading Overlay */}
+        {isLoading && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-app-bg/80 backdrop-blur-sm rounded-2xl">
+            <div className="flex flex-col items-center bg-app-panel p-8 rounded-2xl border border-app-border shadow-2xl">
+              <div className="w-16 h-16 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin mb-4"></div>
+              <h3 className="text-xl font-bold text-app-text mb-2">Generating Content...</h3>
+              <p className="text-app-dim text-sm text-center max-w-xs">
+                Please wait while the AI analyzes your sources and creates the requested artifact. This may take a minute for audio.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!activeTool ? (
+          /* Tools Grid/List */
+          <div className={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : "flex flex-col gap-4"}>
+            {orderedTools.map((tool, index) => (
+              <button
+                key={tool.id}
+                onClick={() => {
+                  if (tool.disabled) return;
+                  if (['bring_to_life', 'youtube_transcript', 'text_summarizer', 'podcast_creator', 'prompt_builder', 'content_builder', 'crypto_trading_assistant', 'stock_trading_assistant', 'currency_trading_assistant', 'spreadsheet_creator', 'datasheet', 'product_research_tool', 'social_generator', 'quiz_creator', 'exec_briefing', 'brainstormer', 'email_drafter', 'marketing_copy', 'swot_analysis', 'code_explainer', 'ebook_generator', 'website_builder', 'image_carver', 'github_publisher'].includes(tool.id)) {
+                    setActiveTool(tool.id);
+                  } else {
+                    onRunTool(tool.id);
+                    onBack();
+                  }
+                }}
+                disabled={tool.disabled}
+                className={`flex ${viewMode === 'grid' ? 'flex-col items-start p-6' : 'flex-row items-center p-4 gap-6'} rounded-2xl border transition-all text-left group ${tool.color} ${tool.disabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-lg hover:scale-[1.02] cursor-pointer'}`}
+              >
+                <div className={`${viewMode === 'grid' ? 'mb-4' : 'mb-0'} p-3 rounded-xl bg-app-bg border border-app-border group-hover:scale-110 transition-transform`}>
+                  {tool.icon}
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-xl font-bold text-app-text mb-2">{index + 1}. {tool.title}</h3>
+                  <p className="text-app-dim text-sm">{tool.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          /* Active Tool View */
+          <div className={`border rounded-2xl p-6 md:p-8 animate-fade-in transition-colors duration-300 ${st.cardBg} ${st.border}`}>
+            <button 
+              onClick={() => setActiveTool(null)}
+              className="mb-6 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 rounded-lg transition-all active:scale-95 flex items-center gap-2 text-sm font-bold"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Back to Tools
+            </button>
+            
+            {activeTool === 'bring_to_life' && (
+              <div className="flex flex-col min-h-[60vh] relative">
+                <div className={`flex flex-col items-center justify-center flex-1 transition-all duration-700 ${isCreationFocused ? 'opacity-0 scale-95 blur-sm pointer-events-none absolute inset-0' : 'opacity-100 scale-100 blur-0'}`}>
+                   <div className="w-full mb-12">
+                      <Hero />
+                   </div>
+                   <div className="w-full flex justify-center mb-12">
+                      <InputArea onGenerate={handleGenerateCreation} isGenerating={isGeneratingCreation} disabled={isCreationFocused} />
+                   </div>
+                   <div className="w-full">
+                      <CreationHistory 
+                        history={bringToLifeHistory} 
+                        onSelect={handleSelectCreation} 
+                        onDelete={handleDeleteCreation}
+                        onEdit={handleEditCreation}
+                      />
+                   </div>
+                </div>
+
+                <LivePreview
+                  creation={activeCreation}
+                  isLoading={isGeneratingCreation}
+                  isFocused={isCreationFocused}
+                  onReset={handleResetCreation}
+                />
+
+                {/* Import Button */}
+                {!isCreationFocused && (
+                  <div className="flex justify-end mt-8">
+                    <button 
+                        onClick={handleImportClick}
+                        className="flex items-center gap-2 p-2 text-zinc-500 hover:text-zinc-300 transition-colors opacity-60 hover:opacity-100"
+                        title="Import Artifact"
+                    >
+                        <span className="text-xs font-medium uppercase tracking-wider">Upload previous artifact (.json)</span>
+                        <Upload className="w-4 h-4" />
+                    </button>
+                    <input 
+                        type="file" 
+                        ref={importInputRef} 
+                        onChange={handleImportFile} 
+                        accept=".json" 
+                        className="hidden" 
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTool === 'youtube_transcript' && (
+              <div className="max-w-3xl mx-auto">
+                <div className="flex items-center justify-between mb-8">
+                    <h2 className="text-2xl font-bold text-app-text flex items-center gap-3">
+                      <span className="p-2 rounded-lg bg-red-500/20 text-red-400">
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </span>
+                      YouTube Transcript Generator
+                    </h2>
+                </div>
+                
+                <div className="space-y-6 bg-app-card border border-app-border rounded-xl p-6">
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-bold text-app-dim uppercase mb-2">YouTube Link</label>
+                            <input 
+                                type="text" 
+                                value={ytLink}
+                                onChange={(e) => { setYtLink(e.target.value); setYtFile(null); }}
+                                placeholder="https://www.youtube.com/watch?v=..."
+                                className="w-full bg-app-bg border border-app-border rounded-lg p-3 text-app-text focus:border-red-500 focus:outline-none transition-colors"
+                            />
+                        </div>
+                        
+                        <div className="flex items-center gap-4">
+                            <div className="h-px flex-1 bg-app-border"></div>
+                            <span className="text-xs font-bold text-app-dim uppercase">OR</span>
+                            <div className="h-px flex-1 bg-app-border"></div>
+                        </div>
+                        
+                        <div>
+                            <label className="block text-xs font-bold text-app-dim uppercase mb-2">Upload Video or Audio File</label>
+                            <div className="relative">
+                                <input 
+                                    type="file" 
+                                    accept="video/*,audio/*"
+                                    onChange={(e) => {
+                                        if (e.target.files?.[0]) {
+                                            setYtFile(e.target.files[0]);
+                                            setYtLink('');
+                                        }
+                                    }}
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                />
+                                <div className={`w-full border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center transition-colors ${ytFile ? 'border-red-500 bg-red-500/5' : 'border-app-border bg-app-bg hover:border-red-500/50 hover:bg-red-500/5'}`}>
+                                    <svg className={`w-8 h-8 mb-2 ${ytFile ? 'text-red-400' : 'text-app-dim'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                    </svg>
+                                    <span className={`text-sm font-bold ${ytFile ? 'text-red-400' : 'text-app-text'}`}>
+                                        {ytFile ? ytFile.name : 'Click or drag media file here'}
+                                    </span>
+                                    {!ytFile && <span className="text-xs text-app-dim mt-1">MP4, MP3, WAV, etc.</span>}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="pt-6 border-t border-app-border">
+                        <label className="block text-xs font-bold text-app-dim uppercase mb-3">Transcription Duration</label>
+                        <div className="grid grid-cols-4 gap-3">
+                            {['1', '3', '5', 'All'].map((dur) => (
+                                <button
+                                    key={dur}
+                                    onClick={() => setYtDuration(dur)}
+                                    className={`py-2 rounded-lg border text-sm font-bold transition-all ${ytDuration === dur ? 'bg-red-500 text-white border-red-500 shadow-lg shadow-red-500/20' : 'bg-app-bg border-app-border text-app-dim hover:text-app-text hover:border-red-500/50'}`}
+                                >
+                                    {dur === 'All' ? 'Full Video' : `${dur} Min`}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    
+                    <div className="pt-6">
+                        <button 
+                            onClick={handleGenerateTranscript}
+                            disabled={isLoading || (!ytLink && !ytFile)}
+                            className="w-full py-4 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 transition-all transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
+                        >
+                            {isLoading ? (
+                                <>
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    <span>Generating Transcript...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                    </svg>
+                                    <span>Generate Transcript</span>
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </div>
+              </div>
+            )}
+
+            {activeTool === 'text_summarizer' && (
+              <div className="max-w-3xl mx-auto">
+                <div className="flex items-center justify-between mb-8">
+                    <h2 className="text-2xl font-bold text-app-text flex items-center gap-3">
+                      <span className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400">
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </span>
+                      Text Summarizer & Translator
+                    </h2>
+                    {onOpenMIPrOMPT && (
+                        <button 
+                            onClick={onOpenMIPrOMPT}
+                            className="p-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white rounded-lg transition-all shadow-lg flex items-center justify-center"
+                            title="mIPrOMPT Library"
+                        >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                            </svg>
+                        </button>
+                    )}
+                </div>
+                
+                <div className="space-y-6 bg-app-card border border-app-border rounded-xl p-6">
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-bold text-app-dim uppercase mb-2">Paste Text</label>
+                            <textarea 
+                                value={summaryText}
+                                onChange={(e) => { setSummaryText(e.target.value); setSummaryFile(null); }}
+                                placeholder="Paste your text here..."
+                                className="w-full h-32 bg-app-bg border border-app-border rounded-lg p-3 text-app-text focus:border-emerald-500 focus:outline-none transition-colors resize-none"
+                            />
+                        </div>
+                        
+                        <div className="flex items-center gap-4">
+                            <div className="h-px flex-1 bg-app-border"></div>
+                            <span className="text-xs font-bold text-app-dim uppercase">OR</span>
+                            <div className="h-px flex-1 bg-app-border"></div>
+                        </div>
+                        
+                        <div>
+                            <label className="block text-xs font-bold text-app-dim uppercase mb-2">Upload File</label>
+                            <div className="relative">
+                                <input 
+                                    type="file" 
+                                    accept=".txt,.md,.csv,.json,.doc,.docx,.pdf"
+                                    onChange={(e) => {
+                                        if (e.target.files?.[0]) {
+                                            setSummaryFile(e.target.files[0]);
+                                            setSummaryText('');
+                                        }
+                                    }}
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                />
+                                <div className={`w-full border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center transition-colors ${summaryFile ? 'border-emerald-500 bg-emerald-500/5' : 'border-app-border bg-app-bg hover:border-emerald-500/50 hover:bg-emerald-500/5'}`}>
+                                    <svg className={`w-8 h-8 mb-2 ${summaryFile ? 'text-emerald-400' : 'text-app-dim'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <span className={`text-sm font-medium ${summaryFile ? 'text-emerald-400' : 'text-app-dim'}`}>
+                                        {summaryFile ? summaryFile.name : 'Click or drag file to upload'}
+                                    </span>
+                                    <span className="text-xs text-app-dim mt-1">Supports TXT, MD, CSV, JSON, DOC, DOCX, PDF</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-app-dim uppercase mb-2">Action</label>
+                                <select 
+                                    value={summaryAction}
+                                    onChange={(e) => setSummaryAction(e.target.value)}
+                                    className="w-full bg-app-bg border border-app-border rounded-lg p-3 text-app-text focus:border-emerald-500 focus:outline-none transition-colors appearance-none"
+                                >
+                                    <option value="summarize">Summarize</option>
+                                    <option value="translate">Translate</option>
+                                    <option value="summarize_translate">Summarize & Translate</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-app-dim uppercase mb-2">Target Language</label>
+                                <select 
+                                    value={summaryLang}
+                                    onChange={(e) => setSummaryLang(e.target.value)}
+                                    className="w-full bg-app-bg border border-app-border rounded-lg p-3 text-app-text focus:border-emerald-500 focus:outline-none transition-colors appearance-none"
+                                >
+                                    <option value="swedish">Swedish</option>
+                                    <option value="english">English</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <button 
+                            onClick={handleGenerateSummary}
+                            disabled={isLoading || (!summaryText && !summaryFile)}
+                            className={`w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2 ${isLoading || (!summaryText && !summaryFile) ? 'bg-app-bg text-app-dim cursor-not-allowed border border-app-border' : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-500/20'}`}
+                        >
+                            {isLoading ? (
+                                <>
+                                    <svg className="animate-spin h-5 w-5 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Processing...
+                                </>
+                            ) : (
+                                <>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                    Generate
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </div>
+              </div>
+            )}
+
+            {activeTool === 'podcast_creator' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-2xl font-bold text-app-text flex items-center gap-3">
+                        <span className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400">
+                          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                          </svg>
+                        </span>
+                        Podcast Creator
+                      </h2>
+                      <button 
+                          onClick={() => setShowHistory(true)}
+                          className="px-3 py-1.5 bg-app-card hover:bg-emerald-500/10 border border-app-border hover:border-emerald-500/50 rounded-lg text-xs font-bold text-emerald-500/70 hover:text-emerald-400 transition-colors flex items-center gap-2 mr-2"
+                      >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          History
+                      </button>
+                      <button 
+                          onClick={() => setShowPrompts(true)}
+                          className="px-3 py-1.5 bg-app-card hover:bg-blue-500/10 border border-app-border hover:border-blue-500/50 rounded-lg text-xs font-bold text-blue-500/70 hover:text-blue-400 transition-colors flex items-center gap-2 mr-2"
+                      >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          Prompts
+                      </button>
+                      <button 
+                          onClick={() => setIsCastLibraryOpen(true)}
+                          className="px-3 py-1.5 bg-app-card hover:bg-purple-500/10 border border-app-border hover:border-purple-500/50 rounded-lg text-xs font-bold text-purple-500/70 hover:text-purple-400 transition-colors flex items-center gap-2"
+                      >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.149-1.268.432-1.828M14 10a6 6 0 01-6 6H6a6 6 0 01-6-6V7a3 3 0 013-3h7a3 3 0 013 3v3zm-4 0a4 4 0 100-8 4 4 0 000 8z" />
+                          </svg>
+                          Cast
+                      </button>
+                  </div>
+                  <p className="text-app-dim mb-6">
+                    Configure your AI podcast hosts and generate a conversation based on your selected session content.
+                  </p>
+
+                  <div className="space-y-6">
+                    {/* Format Selection */}
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Format</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            <button 
+                                onClick={() => setActiveFormat('podcast_1')} 
+                                className={`p-3 rounded-lg border transition-all text-left ${activeFormat === 'podcast_1' ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500' : 'border-app-border bg-app-card hover:border-emerald-500 hover:bg-emerald-500/10'}`}
+                            >
+                                <div className="font-bold text-sm text-emerald-400 mb-1">Solo</div>
+                                <div className="text-[10px] text-app-dim">Single host monologue</div>
+                            </button>
+                            <button 
+                                onClick={() => setActiveFormat('podcast_2')} 
+                                className={`p-3 rounded-lg border transition-all text-left ${activeFormat === 'podcast_2' ? 'border-blue-500 bg-blue-500/10 ring-1 ring-blue-500' : 'border-app-border bg-app-card hover:border-blue-500 hover:bg-blue-500/10'}`}
+                            >
+                                <div className="font-bold text-sm text-blue-400 mb-1">Duo</div>
+                                <div className="text-[10px] text-app-dim">Host & Expert dialogue</div>
+                            </button>
+                            <button 
+                                onClick={() => setActiveFormat('podcast_3')} 
+                                className={`p-3 rounded-lg border transition-all text-left ${activeFormat === 'podcast_3' ? 'border-purple-500 bg-purple-500/10 ring-1 ring-purple-500' : 'border-app-border bg-app-card hover:border-purple-500 hover:bg-purple-500/10'}`}
+                            >
+                                <div className="font-bold text-sm text-purple-400 mb-1">Roundtable</div>
+                                <div className="text-[10px] text-app-dim">3-person discussion</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Length Selection */}
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Target Length</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            {['Short (1-2 min)', 'Medium (3-5 min)', 'Long (Deep Dive)'].map((len) => (
+                                <button
+                                    key={len}
+                                    onClick={() => onUpdateVoiceSettings({ ...voiceSettings, length: len as any })}
+                                    className={`p-2 rounded-lg border text-xs font-bold transition-all ${voiceSettings.length === len ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-card border-app-border text-app-dim hover:text-app-text'}`}
+                                >
+                                    {len.split(' ')[0]}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Language Selection */}
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Podcast Language</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            {['English', 'Swedish'].map((lang) => (
+                                <button
+                                    key={lang}
+                                    onClick={() => onUpdateVoiceSettings({ ...voiceSettings, language: lang as any })}
+                                    className={`p-2 rounded-lg border text-xs font-bold transition-all ${voiceSettings.language === lang || (!voiceSettings.language && lang === 'English') ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-card border-app-border text-app-dim hover:text-app-text'}`}
+                                >
+                                    {lang === 'Swedish' ? 'Svenska' : 'English'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Voice Configuration */}
+                    <div className="space-y-4 pt-4 border-t border-app-border">
+                        <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Cast Configuration</label>
+                            <div className="flex items-center gap-2">
+                                <button 
+                                    onClick={() => setIsCastLibraryOpen(true)}
+                                    className="px-2 py-1 bg-purple-500/10 border border-purple-500/30 rounded text-[10px] font-bold text-purple-400 hover:bg-purple-500/20 flex items-center gap-1 transition-colors"
+                                >
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                                    Manage Cast
+                                </button>
+                                <button 
+                                    onClick={() => setShowBios(!showBios)} 
+                                    className="px-2 py-1 bg-app-card border border-app-border rounded text-[10px] font-bold text-app-dim hover:text-app-text flex items-center gap-1 transition-colors"
+                                >
+                                    {showBios ? (
+                                        <>
+                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268-2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                                            Hide Bios
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                            Show Bios
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 gap-4">
+                            {/* Host Config */}
+                            <div className="flex items-start gap-3 p-3 rounded-lg bg-app-card border border-app-border">
+                                <div className="relative group cursor-pointer shrink-0">
+                                    <div className="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-xs overflow-hidden border border-blue-500/30">
+                                        {voiceSettings.hostAvatar ? (
+                                            <img src={voiceSettings.hostAvatar} alt="Host" className="w-full h-full object-cover" />
+                                        ) : (
+                                            "H"
+                                        )}
+                                    </div>
+                                    <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                    </div>
+                                    <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                        onChange={(e) => e.target.files?.[0] && handleAvatarUpload('host', e.target.files[0])}
+                                    />
+                                </div>
+                                <div className="flex-1 space-y-2 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex-1 min-w-0 space-y-2">
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <div className="text-[10px] font-bold text-app-dim uppercase">Host / Cast Member</div>
+                                                    <div className="flex gap-1 bg-zinc-950 px-1 py-0.5 rounded border border-zinc-800">
+                                                        {(['All', 'Female', 'Male'] as const).map(g => (
+                                                            <button 
+                                                                key={g}
+                                                                type="button"
+                                                                onClick={() => setHostGenderFilter(g)}
+                                                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${hostGenderFilter === g ? 'bg-purple-500 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+                                                            >
+                                                                {g === 'Female' && '♀ '}
+                                                                {g === 'Male' && '♂ '}
+                                                                {g}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <select 
+                                                    value={selectedHostCastMemberId || ''}
+                                                    onChange={(e) => {
+                                                        const selectedId = e.target.value;
+                                                        setSelectedHostCastMemberId(selectedId);
+                                                        const selectedMember = castLibrary.find(m => m.id === selectedId);
+                                                        if (selectedMember) {
+                                                            const standardNames = ['Sax', 'Chameleon', 'The Pinpoint', 'Lars', 'Elena', 'Astrid', 'Oskar', 'Freja', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede', 'Narrator Bot', 'Dr. Insight', 'Curious Listener'];
+                                                            const currentLabel = voiceSettings.hostLabel || '';
+                                                            const isCustom = currentLabel && !standardNames.includes(currentLabel);
+                                                            
+                                                            const updates: any = {
+                                                                host: selectedMember.voice,
+                                                                hostAvatar: selectedMember.avatar,
+                                                                hostBio: selectedMember.bio
+                                                            };
+                                                            if (!isCustom) {
+                                                                updates.hostLabel = selectedMember.name;
+                                                            }
+                                                            onUpdateVoiceSettings({
+                                                                ...voiceSettings,
+                                                                ...updates
+                                                            });
+                                                        }
+                                                    }}
+                                                    className="bg-app-bg border border-app-border text-sm text-app-text rounded px-2 py-1 focus:outline-none w-full"
+                                                >
+                                                    <option value="">Select Cast Member...</option>
+                                                    {castLibrary.filter(m => {
+                                                        // Filter by language
+                                                        const langMatch = voiceSettings.language === 'Swedish'
+                                                            ? (m.name.includes('Lars') || m.id.includes('-sv-'))
+                                                            : !m.id.includes('-sv-');
+                                                        if (!langMatch) return false;
+                                                        
+                                                        // Filter by gender
+                                                        if (hostGenderFilter !== 'All') {
+                                                            return (m.gender || 'Female') === hostGenderFilter;
+                                                        }
+                                                        return true;
+                                                    }).map(member => (
+                                                        <option key={member.id} value={member.id}>
+                                                            {member.gender === 'Male' ? '♂' : '♀'} {member.name} ({member.voice} - {member.gender || 'Female'})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] font-bold text-app-dim uppercase">Display Name</div>
+                                                <input 
+                                                    type="text"
+                                                    value={voiceSettings.hostLabel || ''}
+                                                    onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, hostLabel: e.target.value })}
+                                                    placeholder="Rename Character..."
+                                                    className="bg-app-bg border border-app-border text-xs text-app-text rounded px-3 py-1.5 focus:outline-none w-full focus:border-purple-500 transition-colors"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {showBios && (
+                                        <div className="animate-fade-in">
+                                            <div className="text-[10px] font-bold text-app-dim uppercase mb-1">Bio / Vibe</div>
+                                            <textarea 
+                                                value={voiceSettings.hostBio || ''}
+                                                onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, hostBio: e.target.value })}
+                                                className="w-full bg-black/40 border border-app-border rounded-lg p-3 text-xs text-app-text focus:outline-none focus:border-purple-500 resize-none h-20 placeholder-white/20 shadow-inner"
+                                                placeholder="Describe personality..."
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            {/* Expert Config */}
+                            <div className="flex items-start gap-3 p-3 rounded-lg bg-app-card border border-app-border">
+                                <div className="relative group cursor-pointer shrink-0">
+                                    <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 font-bold text-xs overflow-hidden border border-green-500/30">
+                                        {voiceSettings.expertAvatar ? (
+                                            <img src={voiceSettings.expertAvatar} alt="Expert" className="w-full h-full object-cover" />
+                                        ) : (
+                                            "E"
+                                        )}
+                                    </div>
+                                    <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                    </div>
+                                    <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                        onChange={(e) => e.target.files?.[0] && handleAvatarUpload('expert', e.target.files[0])}
+                                    />
+                                </div>
+                                <div className="flex-1 space-y-2 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex-1 min-w-0 space-y-2">
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <div className="text-[10px] font-bold text-app-dim uppercase">Expert / Cast Member</div>
+                                                    <div className="flex gap-1 bg-zinc-950 px-1 py-0.5 rounded border border-zinc-800">
+                                                        {(['All', 'Female', 'Male'] as const).map(g => (
+                                                            <button 
+                                                                key={g}
+                                                                type="button"
+                                                                onClick={() => setExpertGenderFilter(g)}
+                                                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${expertGenderFilter === g ? 'bg-purple-500 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+                                                            >
+                                                                {g === 'Female' && '♀ '}
+                                                                {g === 'Male' && '♂ '}
+                                                                {g}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <select 
+                                                    value={selectedExpertCastMemberId || ''}
+                                                    onChange={(e) => {
+                                                        const selectedId = e.target.value;
+                                                        setSelectedExpertCastMemberId(selectedId);
+                                                        const selectedMember = castLibrary.find(m => m.id === selectedId);
+                                                        if (selectedMember) {
+                                                            const standardNames = ['Sax', 'Chameleon', 'The Pinpoint', 'Lars', 'Elena', 'Astrid', 'Oskar', 'Freja', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede', 'Narrator Bot', 'Dr. Insight', 'Curious Listener'];
+                                                            const currentLabel = voiceSettings.expertLabel || '';
+                                                            const isCustom = currentLabel && !standardNames.includes(currentLabel);
+                                                            
+                                                            const updates: any = {
+                                                                expert: selectedMember.voice,
+                                                                expertAvatar: selectedMember.avatar,
+                                                                expertBio: selectedMember.bio
+                                                            };
+                                                            if (!isCustom) {
+                                                                updates.expertLabel = selectedMember.name;
+                                                            }
+                                                            onUpdateVoiceSettings({
+                                                                ...voiceSettings,
+                                                                ...updates
+                                                            });
+                                                        }
+                                                    }}
+                                                    className="bg-app-bg border border-app-border text-sm text-app-text rounded px-2 py-1 focus:outline-none w-full"
+                                                >
+                                                    <option value="">Select Cast Member...</option>
+                                                    {castLibrary.filter(m => {
+                                                        // Filter by language
+                                                        const langMatch = voiceSettings.language === 'Swedish'
+                                                            ? (m.name.includes('Elena') || m.id.includes('-sv-'))
+                                                            : !m.id.includes('-sv-');
+                                                        if (!langMatch) return false;
+                                                        
+                                                        // Filter by gender
+                                                        if (expertGenderFilter !== 'All') {
+                                                            return (m.gender || 'Female') === expertGenderFilter;
+                                                        }
+                                                        return true;
+                                                    }).map(member => (
+                                                        <option key={member.id} value={member.id}>
+                                                            {member.gender === 'Male' ? '♂' : '♀'} {member.name} ({member.voice} - {member.gender || 'Female'})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] font-bold text-app-dim uppercase">Display Name</div>
+                                                <input 
+                                                    type="text"
+                                                    value={voiceSettings.expertLabel || ''}
+                                                    onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, expertLabel: e.target.value })}
+                                                    placeholder="Rename Character..."
+                                                    className="bg-app-bg border border-app-border text-xs text-app-text rounded px-3 py-1.5 focus:outline-none w-full focus:border-cyan-500 transition-colors"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {showBios && (
+                                        <div className="animate-fade-in">
+                                            <div className="text-[10px] font-bold text-app-dim uppercase mb-1">Bio / Vibe</div>
+                                            <textarea 
+                                                value={voiceSettings.expertBio || ''}
+                                                onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, expertBio: e.target.value })}
+                                                className="w-full bg-black/40 border border-app-border rounded-lg p-3 text-xs text-app-text focus:outline-none focus:border-cyan-500 resize-none h-20 placeholder-white/20 shadow-inner"
+                                                placeholder="Describe personality..."
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Guest Config */}
+                            <div className="flex items-start gap-3 p-3 rounded-lg bg-app-card border border-app-border">
+                                <div className="relative group cursor-pointer shrink-0">
+                                    <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400 font-bold text-xs overflow-hidden border border-amber-500/30">
+                                        {voiceSettings.guestAvatar ? (
+                                            <img src={voiceSettings.guestAvatar} alt="Guest" className="w-full h-full object-cover" />
+                                        ) : (
+                                            "G"
+                                        )}
+                                    </div>
+                                    <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                    </div>
+                                    <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                        onChange={(e) => e.target.files?.[0] && handleAvatarUpload('guest', e.target.files[0])}
+                                    />
+                                </div>
+                                <div className="flex-1 space-y-2 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex-1 min-w-0 space-y-2">
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <div className="text-[10px] font-bold text-app-dim uppercase">Guest / Cast Member</div>
+                                                    <div className="flex gap-1 bg-zinc-950 px-1 py-0.5 rounded border border-zinc-800">
+                                                        {(['All', 'Female', 'Male'] as const).map(g => (
+                                                            <button 
+                                                                key={g}
+                                                                type="button"
+                                                                onClick={() => setGuestGenderFilter(g)}
+                                                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${guestGenderFilter === g ? 'bg-purple-500 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+                                                            >
+                                                                {g === 'Female' && '♀ '}
+                                                                {g === 'Male' && '♂ '}
+                                                                {g}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <select 
+                                                    value={selectedGuestCastMemberId || ''}
+                                                    onChange={(e) => {
+                                                        const selectedId = e.target.value;
+                                                        setSelectedGuestCastMemberId(selectedId);
+                                                        const selectedMember = castLibrary.find(m => m.id === selectedId);
+                                                        if (selectedMember) {
+                                                            const standardNames = ['Sax', 'Chameleon', 'The Pinpoint', 'Lars', 'Elena', 'Astrid', 'Oskar', 'Freja', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede', 'Narrator Bot', 'Dr. Insight', 'Curious Listener'];
+                                                            const currentLabel = voiceSettings.guestLabel || '';
+                                                            const isCustom = currentLabel && !standardNames.includes(currentLabel);
+                                                            
+                                                            const updates: any = {
+                                                                guest: selectedMember.voice,
+                                                                guestAvatar: selectedMember.avatar,
+                                                                guestBio: selectedMember.bio
+                                                            };
+                                                            if (!isCustom) {
+                                                                updates.guestLabel = selectedMember.name;
+                                                            }
+                                                            onUpdateVoiceSettings({
+                                                                ...voiceSettings,
+                                                                ...updates
+                                                            });
+                                                        }
+                                                    }}
+                                                    className="bg-app-bg border border-app-border text-sm text-app-text rounded px-2 py-1 focus:outline-none w-full"
+                                                >
+                                                    <option value="">Select Cast Member...</option>
+                                                    {castLibrary.filter(m => {
+                                                        // Filter by language
+                                                        const langMatch = voiceSettings.language === 'Swedish'
+                                                            ? m.id.includes('-sv-')
+                                                            : !m.id.includes('-sv-');
+                                                        if (!langMatch) return false;
+                                                        
+                                                        // Filter by gender
+                                                        if (guestGenderFilter !== 'All') {
+                                                            return (m.gender || 'Female') === guestGenderFilter;
+                                                        }
+                                                        return true;
+                                                    }).map(member => (
+                                                        <option key={member.id} value={member.id}>
+                                                            {member.gender === 'Male' ? '♂' : '♀'} {member.name} ({member.voice} - {member.gender || 'Female'})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] font-bold text-app-dim uppercase">Display Name</div>
+                                                <input 
+                                                    type="text"
+                                                    value={voiceSettings.guestLabel || ''}
+                                                    onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, guestLabel: e.target.value })}
+                                                    placeholder="Rename Character..."
+                                                    className="bg-app-bg border border-app-border text-xs text-app-text rounded px-3 py-1.5 focus:outline-none w-full focus:border-amber-500 transition-colors"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {showBios && (
+                                        <div className="animate-fade-in">
+                                            <div className="text-[10px] font-bold text-app-dim uppercase mb-1">Bio / Vibe</div>
+                                            <textarea 
+                                                value={voiceSettings.guestBio || ''}
+                                                onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, guestBio: e.target.value })}
+                                                className="w-full bg-black/40 border border-app-border rounded-lg p-3 text-xs text-app-text focus:outline-none focus:border-amber-500 resize-none h-20 placeholder-white/20 shadow-inner"
+                                                placeholder="Describe personality..."
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Preview / Action Area */}
+                <div className="flex flex-col gap-6">
+                    {/* Standalone Content Input Section */}
+                    <div className="bg-app-card rounded-xl border border-app-border p-5 text-left space-y-4 shadow-sm">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-bold text-app-text flex items-center gap-2 uppercase tracking-wider">
+                                <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                                Podcast Content / Topic Input
+                            </h3>
+                            {hasActiveSession ? (
+                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={podcastIncludeSessionData} 
+                                        onChange={(e) => setPodcastIncludeSessionData(e.target.checked)}
+                                        className="rounded border-zinc-700 bg-zinc-900 text-purple-600 focus:ring-purple-500/50 h-4 w-4"
+                                    />
+                                    <span className="text-xs text-app-dim hover:text-app-text transition-colors">Include Session Data</span>
+                                </label>
+                            ) : (
+                                <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700">
+                                    Custom Input Only (No Session)
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="space-y-1">
+                            <textarea
+                                value={podcastCustomInput}
+                                onChange={(e) => setPodcastCustomInput(e.target.value)}
+                                placeholder="What should the hosts discuss? Type a topic, list of questions, talking points, or copy-paste text here..."
+                                className="w-full bg-zinc-950/60 border border-app-border rounded-lg p-3 text-xs text-app-text focus:outline-none focus:border-purple-500/80 resize-none h-44 placeholder-white/20 shadow-inner"
+                            />
+                            <div className="flex justify-between items-center text-[10px] text-app-dim">
+                                <span>{podcastCustomInput.length} characters</span>
+                                <span>Session data use is optional</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-app-bg rounded-xl border border-app-border p-6 flex flex-col items-center justify-center text-center">
+                        <div className="mb-4 p-3 rounded-full bg-purple-500/10 text-purple-400">
+                            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                            </svg>
+                        </div>
+                        <h3 className="text-lg font-bold text-app-text mb-1">{t('studio.readyToGenerate')}</h3>
+                        <p className="text-app-dim text-xs mb-6 max-w-xs">
+                            {t('studio.readyToGenerateDesc')}
+                        </p>
+                        
+                        <button 
+                            onClick={() => {
+                                if (!podcastCustomInput.trim() && (!hasActiveSession || !podcastIncludeSessionData)) {
+                                    alert("Please enter a custom topic/content or check 'Include Session Data' to provide source material for your podcast!");
+                                    return;
+                                }
+                                onRunTool(activeFormat, { 
+                                    isIndependent: true, 
+                                    includeSessionData: hasActiveSession && podcastIncludeSessionData, 
+                                    customInput: podcastCustomInput 
+                                });
+                            }}
+                            disabled={isLoading}
+                            className="w-full max-w-xs py-3.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
+                        >
+                            {isLoading ? (
+                                <>
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    <span>{t('studio.generating')}</span>
+                                </>
+                            ) : (
+                                <>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span>{t('studio.generatePodcast')}</span>
+                                </>
+                            )}
+                        </button>
+                        <p className="mt-4 text-[9px] text-app-dim max-w-xs leading-relaxed">
+                            {t('studio.generationNote')}
+                        </p>
+                    </div>
+                </div>
+              </div>
+            )}
+
+            {activeTool === 'crypto_trading_assistant' && (
+              <div className="animate-fade-in -m-6 md:-m-8">
+                <CryptoTradingAssistant />
+              </div>
+            )}
+
+            {activeTool === 'stock_trading_assistant' && (
+              <div className="animate-fade-in -m-6 md:-m-8">
+                <StockTradingAssistant />
+              </div>
+            )}
+
+            {activeTool === 'currency_trading_assistant' && (
+              <div className="animate-fade-in -m-6 md:-m-8">
+                <CurrencyTradingAssistant />
+              </div>
+            )}
+
+            {activeTool === 'spreadsheet_creator' && (
+              <div className="animate-fade-in max-w-5xl mx-auto">
+                <div className="flex items-center justify-between mb-8">
+                  <h2 className="text-2xl font-bold text-app-text flex items-center gap-3">
+                    <span className="p-2 rounded-lg bg-green-500/20 text-green-400">
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    </span>
+                    Smart Spreadsheet Model Creator
+                  </h2>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  {/* Left Column Controls */}
+                  <div className="lg:col-span-5 space-y-6 bg-app-card border border-app-border rounded-2xl p-6">
+                    <div>
+                      <label className="block text-xs font-bold text-app-dim uppercase mb-2">Spreadsheet Title</label>
+                      <input 
+                        type="text" 
+                        value={sheetName} 
+                        onChange={(e) => setSheetName(e.target.value)}
+                        placeholder="e.g. Q3 Financial Plan"
+                        className="w-full bg-app-bg border border-app-border rounded-xl px-4 py-3 text-app-text focus:outline-none focus:border-green-500 transition-colors"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-app-dim uppercase mb-2">Rows Count ({sheetRows} Rows)</label>
+                      <div className="flex items-center gap-4">
+                        <input 
+                          type="range" 
+                          min="5" 
+                          max="40" 
+                          value={sheetRows} 
+                          onChange={(e) => setSheetRows(parseInt(e.target.value))}
+                          className="flex-1 accent-green-500 bg-app-bg"
+                        />
+                        <span className="text-xs font-bold bg-green-500/10 text-green-400 px-2.5 py-1 rounded-lg">{sheetRows} rows</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-app-dim uppercase mb-2">Select Template Preset</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {Object.entries(SHEET_TEMPLATES).map(([key, value]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              setSheetTemplate(key);
+                              setSheetName(value.name);
+                            }}
+                            className={`p-3 text-left rounded-xl border text-xs font-medium transition-all ${sheetTemplate === key ? 'bg-green-500/10 border-green-500 text-green-400' : 'bg-app-bg border-app-border text-app-dim hover:text-app-text hover:border-zinc-700'}`}
+                          >
+                            {value.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {hasActiveSession && (
+                      <div>
+                        <label className="flex items-center gap-3 cursor-pointer p-4 bg-app-bg border border-app-border rounded-xl hover:border-green-500/50 transition-all select-none">
+                          <input 
+                            type="checkbox" 
+                            checked={useSessionData} 
+                            onChange={(e) => setUseSessionData(e.target.checked)} 
+                            className="w-4 h-4 rounded bg-app-panel border-app-border text-green-500 focus:ring-green-500/30 accent-green-500"
+                          />
+                          <div>
+                            <span className="text-xs font-bold text-app-text block">Use Workspace Session Context</span>
+                            <span className="text-[10px] text-app-dim block mt-0.5">Use active transcripts and files to fill custom rows.</span>
+                          </div>
+                        </label>
+                      </div>
+                    )}
+
+                    <div className="border-t border-app-border pt-6">
+                      <label className="block text-xs font-bold text-app-dim uppercase mb-2">AI Custom Dictation / Prompt</label>
+                      <div className="space-y-4">
+                        <textarea
+                          rows={4}
+                          value={sheetCustomPrompt}
+                          onChange={(e) => setSheetCustomPrompt(e.target.value)}
+                          placeholder="Dictate template requirements, custom spreadsheet headers, calculation instructions..."
+                          className="w-full bg-app-bg border border-app-border rounded-xl px-4 py-3 text-app-text placeholder-zinc-600 focus:outline-none focus:border-green-500 transition-colors text-xs resize-none"
+                        />
+                        <div className="flex justify-end">
+                          <AudioInput 
+                            onTranscript={(text) => {
+                              setSheetCustomPrompt(prev => prev ? `${prev} ${text}` : text);
+                            }}
+                            placeholder="Speak template custom directives..."
+                            className="scale-90"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleGenerateSpreadsheet}
+                      disabled={isGeneratingSheet}
+                      className="w-full py-3.5 bg-green-500 hover:bg-green-600 disabled:opacity-40 text-black font-bold text-sm tracking-wide rounded-xl shadow-lg transition-transform hover:scale-[1.01] flex items-center justify-center gap-2"
+                    >
+                      {isGeneratingSheet ? (
+                        <>
+                          <svg className="animate-spin h-5 w-5 text-black" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          Generating Spreadsheet Model...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                          </svg>
+                          Compile & Build Spreadsheet
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Right Column Preview Table */}
+                  <div className="lg:col-span-7 flex flex-col justify-between">
+                    {spreadsheetResult ? (
+                      <div className="bg-app-card border border-app-border rounded-2xl p-6 flex-1 flex flex-col min-h-[400px]">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-app-border pb-4 mb-4">
+                          <div>
+                            <h3 className="text-base font-bold text-app-text">{spreadsheetResult.sheetName}</h3>
+                            <p className="text-[11px] text-app-dim mt-0.5">Showing compiled preview model with {spreadsheetResult.rows.length} records</p>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={downloadCSV}
+                              className="px-3.5 py-2 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20 text-xs font-bold flex items-center gap-1.5 transition-all"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                              </svg>
+                              Export CSV
+                            </button>
+                            
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSpreadsheetResult(null);
+                                setSheetSearch('');
+                              }}
+                              className="p-2 rounded-xl bg-app-bg text-app-dim hover:text-white border border-app-border transition-colors text-xs"
+                              title="Clear Results"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Search Filter bar */}
+                        <div className="mb-4">
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-dim">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                              </svg>
+                            </span>
+                            <input
+                              type="text"
+                              value={sheetSearch}
+                              onChange={(e) => setSheetSearch(e.target.value)}
+                              placeholder="Search rows..."
+                              className="w-full bg-app-bg border border-app-border rounded-xl pl-9 pr-4 py-2 text-xs text-app-text focus:outline-none focus:border-green-500 transition-colors"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Table Display */}
+                        <div className="flex-1 overflow-x-auto border border-app-border rounded-xl bg-app-bg max-h-[360px]">
+                          <table className="w-full border-collapse text-left text-xs text-app-text">
+                            <thead>
+                              <tr className="bg-app-card border-b border-app-border sticky top-0 z-10">
+                                {spreadsheetResult.columns.map((col, idx) => (
+                                  <th key={idx} className="p-3 font-bold text-app-dim bg-app-card uppercase tracking-wider text-[10px] whitespace-nowrap">{col}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-app-border">
+                              {spreadsheetResult.rows
+                                .filter(row => row.some(cell => String(cell).toLowerCase().includes(sheetSearch.toLowerCase())))
+                                .map((row, rowIdx) => (
+                                  <tr key={rowIdx} className="hover:bg-green-500/[0.02] transition-colors">
+                                    {row.map((cell, cellIdx) => (
+                                      <td key={cellIdx} className="p-3 text-app-text whitespace-nowrap">{String(cell)}</td>
+                                    ))}
+                                  </tr>
+                                ))
+                              }
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-app-card border border-app-border rounded-2xl p-6 flex-1 flex flex-col items-center justify-center text-center py-16">
+                        <span className="p-4 rounded-full bg-green-500/5 text-green-500 border border-green-500/10 mb-4">
+                          <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                        </span>
+                        <h3 className="text-base font-bold text-app-text mb-2">No Spreadsheet Generated Yet</h3>
+                        <p className="text-xs text-app-dim max-w-sm mb-6 leading-relaxed">Customize your name and parameters, dictate prompts or use session context sources, then build and compile to analyze your data.</p>
+                        
+                        <div className="flex flex-wrap justify-center gap-2 max-w-md">
+                          <span className="text-[10px] px-2.5 py-1 rounded bg-app-bg border border-app-border text-app-dim font-mono">100% Client-Side Ready</span>
+                          <span className="text-[10px] px-2.5 py-1 rounded bg-app-bg border border-app-border text-app-dim font-mono">Export to CSV File</span>
+                          <span className="text-[10px] px-2.5 py-1 rounded bg-app-bg border border-app-border text-app-dim font-mono">AI Custom Columns</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            
+
+            
+
+            
+
+            {activeTool === 'product_research_tool' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <ProductResearchTool 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'image_carver' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <ImageCarverTool />
+              </div>
+            )}
+
+            {activeTool === 'github_publisher' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <GitHubPublisherTool />
+              </div>
+            )}
+            
+            
+            {activeTool === 'social_generator' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <SocialMediaSuite 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'quiz_creator' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <QuizAssessmentCreator 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'exec_briefing' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <ExecutiveBriefing 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'brainstormer' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <Brainstormer 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'email_drafter' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <EmailDrafter 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'marketing_copy' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <MarketingCopywriter 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'swot_analysis' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <SwotAnalysis 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'code_explainer' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <CodeExplainer 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'ebook_generator' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <EbookGenerator 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'website_builder' && (
+              <div className="max-w-6xl mx-auto animate-fade-in">
+                <WebsiteBuilder 
+                  session={session} 
+                  onSaveArtifact={onSaveArtifact}
+                />
+              </div>
+            )}
+
+            {activeTool === 'datasheet' && (
+              <div className="max-w-7xl mx-auto animate-fade-in">
+                <StudioDatasheet 
+                  onRunTool={(toolId) => {
+                    // Map local app IDs to internal runtime tool IDs
+                    const DATASHEET_ID_MAP: Record<string, string> = {
+                      app1: 'bring_to_life',
+                      app2: 'podcast_creator',
+                      app3: 'prompt_builder',
+                      app4: 'content_builder',
+                      app5: 'youtube_transcript',
+                      app6: 'text_summarizer',
+                      app7: 'social_generator',
+                      app8: 'quiz_creator',
+                      app9: 'exec_briefing',
+                      app10: 'brainstormer',
+                      app11: 'email_drafter',
+                      app12: 'marketing_copy',
+                      app13: 'swot_analysis',
+                      app14: 'code_explainer',
+                      app15: 'ebook_generator',
+                      app16: 'image_generator',
+                      app17: 'spreadsheet_creator',
+                      app19: 'website_builder',
+                      app22: 'product_research_tool'
+                    };
+                    const mappedId = DATASHEET_ID_MAP[toolId] || toolId;
+                    
+                    // Let the user switch tools directly from the datasheet!
+                    if (['bring_to_life', 'youtube_transcript', 'text_summarizer', 'podcast_creator', 'prompt_builder', 'content_builder', 'crypto_trading_assistant', 'stock_trading_assistant', 'currency_trading_assistant', 'spreadsheet_creator', 'product_research_tool', 'social_generator', 'quiz_creator', 'exec_briefing', 'brainstormer', 'email_drafter', 'marketing_copy', 'swot_analysis', 'code_explainer', 'ebook_generator', 'website_builder'].includes(mappedId)) {
+                      setActiveTool(mappedId);
+                    } else {
+                      onRunTool(mappedId);
+                      onBack();
+                    }
+                  }}
+                  onClose={() => setActiveTool(null)}
+                />
+              </div>
+            )}
+
+            {(activeTool === 'prompt_builder' || activeTool === 'content_builder') && (
+                <div className="max-w-6xl mx-auto animate-fade-in">
+                    <div className="flex items-center justify-between mb-8">
+                        <h2 className="text-2xl font-bold text-app-text flex items-center gap-3">
+                            <span className={`p-2 rounded-lg ${activeTool === 'prompt_builder' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-orange-500/20 text-orange-400'}`}>
+                                {activeTool === 'prompt_builder' ? (
+                                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                ) : (
+                                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9.5a2.5 2.5 0 00-2.5-2.5H15M9 11l3 3L22 4" />
+                                    </svg>
+                                )}
+                            </span>
+                            {activeTool === 'prompt_builder' ? 'Prompt Builder' : 'Content Builder'}
+                        </h2>
+                        {onOpenMIPrOMPT && (
+                            <button 
+                                onClick={onOpenMIPrOMPT}
+                                className="p-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white rounded-lg transition-all shadow-lg flex items-center justify-center"
+                                title="mIPrOMPT Library"
+                            >
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                        {/* Main Builder Form */}
+                        <div className="lg:col-span-7 bg-app-card border border-app-border rounded-xl p-6 space-y-6 overflow-hidden relative h-fit">
+                        <div className={`transition-transform duration-300 ${builderStep === 1 ? 'translate-x-0' : '-translate-x-full absolute opacity-0 pointer-events-none'}`}>
+                            <div className="space-y-6">
+                                <div className="mb-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-3">
+                                            <label className="block text-xs font-bold text-app-dim uppercase">Quick Templates</label>
+                                            <label className="flex items-center gap-1 cursor-pointer group">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={showAdvancedTemplates}
+                                                    onChange={(e) => setShowAdvancedTemplates(e.target.checked)}
+                                                    className="w-3 h-3 rounded bg-app-bg border border-app-border accent-emerald-500 cursor-pointer"
+                                                />
+                                                <span className="text-[10px] text-app-dim group-hover:text-app-text transition-colors">Show Advanced</span>
+                                            </label>
+                                        </div>
+                                        <button 
+                                            onClick={() => {
+                                                const templates = activeTool === 'prompt_builder' ? promptTemplates : contentTemplates;
+                                                const randomTemplate = templates[Math.floor(Math.random() * templates.length)];
+                                                setBuilderInput(randomTemplate.prompt);
+                                                setSelectedTemplate(randomTemplate.id);
+                                            }}
+                                            className="px-2 py-1 bg-gradient-to-r from-purple-500/20 to-blue-500/20 text-purple-400 hover:text-purple-300 text-[10px] font-bold rounded border border-purple-500/30 transition-all flex items-center gap-1"
+                                        >
+                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                            </svg>
+                                            Quick Suggestion
+                                        </button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {(activeTool === 'prompt_builder' ? promptTemplates : contentTemplates).map(t => (
+                                            <button 
+                                                key={t.id}
+                                                onClick={() => {
+                                                    setBuilderInput(t.prompt);
+                                                    setSelectedTemplate(t.id);
+                                                }}
+                                                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${selectedTemplate === t.id ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-bg text-app-dim border-app-border hover:border-app-text hover:text-app-text'}`}
+                                            >
+                                                {t.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <label className="block text-xs font-bold text-app-dim uppercase">Instructions / Topic</label>
+                                            <AudioInput 
+                                                onTranscript={(text) => {
+                                                    setBuilderInput(prev => prev ? `${prev} ${text}` : text);
+                                                    setSelectedTemplate(null);
+                                                }}
+                                                placeholder="Speak instructions..."
+                                                className="scale-90"
+                                            />
+                                        </div>
+                                        {builderInput.trim() && onAddMIPrOMPT && (
+                                            <button 
+                                                onClick={() => {
+                                                    const timestamp = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                                    const autoTitle = activeTool === 'prompt_builder' ? `Custom Prompt (${timestamp})` : `Custom Builder (${timestamp})`;
+                                                    onAddMIPrOMPT(activeTool === 'prompt_builder' ? 'prB' : 'ctB', builderInput, autoTitle);
+                                                }}
+                                                className="px-2 py-1 text-[10px] font-bold rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors border border-blue-500/30"
+                                            >
+                                                + Save to mIPrOMPT Library
+                                            </button>
+                                        )}
+                                    </div>
+                                    <textarea 
+                                        value={builderInput}
+                                        onChange={(e) => {
+                                            setBuilderInput(e.target.value);
+                                            setSelectedTemplate(null);
+                                        }}
+                                        placeholder={`Describe what you want to ${activeTool === 'prompt_builder' ? 'generate a prompt for' : 'build exactly'}, or leave empty if your selected session contains all required instructions.`}
+                                        className="w-full h-32 bg-app-bg border border-app-border rounded-lg p-3 text-app-text focus:border-app-text focus:outline-none transition-colors resize-none mb-1"
+                                    />
+                                    <div className="text-[10px] text-app-dim mt-2 flex flex-wrap gap-2 items-center">
+                                        {[
+                                            { id: 'product', val: builderProductType, set: setBuilderProductType },
+                                            { id: 'niche', val: builderNiche, set: setBuilderNiche },
+                                            { id: 'skill', val: builderSkillLevel, set: setBuilderSkillLevel },
+                                            { id: 'goal', val: builderPrimaryGoal, set: setBuilderPrimaryGoal },
+                                            { id: 'platform', val: builderSellingPlatform, set: setBuilderSellingPlatform },
+                                            { id: 'color', val: builderColorScheme, set: setBuilderColorScheme },
+                                            { id: 'promotion', val: builderPromotionStrategy, set: setBuilderPromotionStrategy },
+                                        ].filter(c => c.val).map(config => {
+                                            const isGrey = greyedConfigs.includes(config.id);
+                                            return (
+                                                <span 
+                                                    key={config.id}
+                                                    onClick={() => setGreyedConfigs(prev => prev.includes(config.id) ? prev.filter(id => id !== config.id) : [...prev, config.id])}
+                                                    onDoubleClick={() => {
+                                                        config.set('');
+                                                        setGreyedConfigs(prev => prev.filter(id => id !== config.id));
+                                                    }}
+                                                    className={`cursor-pointer font-bold px-2 py-0.5 rounded border transition-colors select-none ${isGrey ? 'bg-app-bg text-app-dim border-app-border opacity-50 hover:opacity-100' : 'bg-app-text text-app-bg border-app-text hover:bg-app-text/80'}`}
+                                                    title="Click to grey out, Double-click to remove completely"
+                                                >
+                                                    {config.val}
+                                                </span>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-xs font-bold text-app-dim uppercase mb-2">Include Session Data (Optional)</label>
+                                    <select 
+                                        value={builderSessionId}
+                                        onChange={(e) => setBuilderSessionId(e.target.value)}
+                                        className="w-full bg-app-bg border border-app-border text-sm text-app-text rounded-lg px-3 py-3 focus:outline-none focus:border-app-text transition-colors cursor-pointer"
+                                    >
+                                        <option value="none">-- Do Not Include Session Data --</option>
+                                        {sessions.map(s => (
+                                            <option key={s.id} value={s.id}>
+                                                {s.name} ({s.mediaItems.length} items)
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <div className="text-[10px] text-app-dim mt-2">
+                                        Use selected sources from a specific session as background context for your generation.
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-4 mt-6">
+                                    <button 
+                                        onClick={() => handleIndependentBuilderGenerate(activeTool)}
+                                        className="flex-1 py-4 bg-app-text text-app-bg font-bold rounded-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                                        </svg>
+                                        Quick Generate
+                                    </button>
+                                    <button 
+                                        onClick={() => setBuilderStep(2)}
+                                        className="flex-1 py-4 bg-app-panel text-app-text font-bold border border-app-border rounded-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
+                                    >
+                                        Options+
+                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className={`transition-transform duration-300 ${builderStep === 2 ? 'translate-x-0' : 'translate-x-full absolute opacity-0 pointer-events-none top-6 left-6 right-6'}`}>
+                            <div className="space-y-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => setBuilderStep(1)} className="text-sm font-bold text-app-dim hover:text-app-text flex items-center gap-1">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                                            </svg>
+                                            Back
+                                        </button>
+                                        <h3 className="text-lg font-bold text-app-text ml-2">Advanced Configuration</h3>
+                                    </div>
+                                    <button 
+                                        onClick={() => {
+                                            setBuilderProductType(productTypePresets[Math.floor(Math.random() * productTypePresets.length)]);
+                                            setBuilderNiche(nichePresets[Math.floor(Math.random() * nichePresets.length)]);
+                                            setBuilderSkillLevel(skillLevelPresets[Math.floor(Math.random() * skillLevelPresets.length)]);
+                                            setBuilderPrimaryGoal(primaryGoalPresets[Math.floor(Math.random() * primaryGoalPresets.length)]);
+                                            setBuilderSellingPlatform(sellingPlatformPresets[Math.floor(Math.random() * sellingPlatformPresets.length)]);
+                                            setBuilderColorScheme(colorSchemePresets[Math.floor(Math.random() * colorSchemePresets.length)]);
+                                            setBuilderPromotionStrategy(promotionStrategyPresets[Math.floor(Math.random() * promotionStrategyPresets.length)]);
+                                        }}
+                                        className="px-3 py-1.5 bg-gradient-to-r from-purple-500/20 to-blue-500/20 text-purple-400 hover:text-purple-300 text-xs font-bold rounded border border-purple-500/30 transition-all flex items-center gap-2"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                                        </svg>
+                                        Quick Suggestion
+                                    </button>
+                                </div>
+                                <div className="space-y-8">
+                                    <div>
+                                        <label className="block text-xs font-bold text-app-text uppercase mb-2">Product Type</label>
+                                        <input type="text" value={builderProductType} onChange={e => setBuilderProductType(e.target.value)} placeholder="Type or select below..." className="w-full bg-app-bg border border-app-border text-sm text-app-text rounded-lg px-3 py-2 mb-2 focus:outline-none focus:border-app-text transition-colors"/>
+                                        <div className="flex flex-wrap gap-2">
+                                            {productTypePresets.map(preset => (
+                                                <button key={preset} onClick={() => setBuilderProductType(preset)} className={`px-2 py-1 text-[10px] rounded-md border transition-colors ${builderProductType === preset ? 'bg-app-text text-app-bg border-app-text font-bold' : 'bg-app-panel text-app-dim border-app-border hover:bg-app-bg hover:text-app-text'}`}>{preset}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-app-text uppercase mb-2">Niche / Topic</label>
+                                        <input type="text" value={builderNiche} onChange={e => setBuilderNiche(e.target.value)} placeholder="Type or select below..." className="w-full bg-app-bg border border-app-border text-sm text-app-text rounded-lg px-3 py-2 mb-2 focus:outline-none focus:border-app-text transition-colors"/>
+                                        <div className="flex flex-wrap gap-2">
+                                            {nichePresets.map(preset => (
+                                                <button key={preset} onClick={() => setBuilderNiche(preset)} className={`px-2 py-1 text-[10px] rounded-md border transition-colors ${builderNiche === preset ? 'bg-app-text text-app-bg border-app-text font-bold' : 'bg-app-panel text-app-dim border-app-border hover:bg-app-bg hover:text-app-text'}`}>{preset}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-app-text uppercase mb-2">Skill Level</label>
+                                        <input type="text" value={builderSkillLevel} onChange={e => setBuilderSkillLevel(e.target.value)} placeholder="Type or select below..." className="w-full bg-app-bg border border-app-border text-sm text-app-text rounded-lg px-3 py-2 mb-2 focus:outline-none focus:border-app-text transition-colors"/>
+                                        <div className="flex flex-wrap gap-2">
+                                            {skillLevelPresets.map(preset => (
+                                                <button key={preset} onClick={() => setBuilderSkillLevel(preset)} className={`px-2 py-1 text-[10px] rounded-md border transition-colors ${builderSkillLevel === preset ? 'bg-app-text text-app-bg border-app-text font-bold' : 'bg-app-panel text-app-dim border-app-border hover:bg-app-bg hover:text-app-text'}`}>{preset}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-app-text uppercase mb-2">Primary Goal</label>
+                                        <input type="text" value={builderPrimaryGoal} onChange={e => setBuilderPrimaryGoal(e.target.value)} placeholder="Type or select below..." className="w-full bg-app-bg border border-app-border text-sm text-app-text rounded-lg px-3 py-2 mb-2 focus:outline-none focus:border-app-text transition-colors"/>
+                                        <div className="flex flex-wrap gap-2">
+                                            {primaryGoalPresets.map(preset => (
+                                                <button key={preset} onClick={() => setBuilderPrimaryGoal(preset)} className={`px-2 py-1 text-[10px] rounded-md border transition-colors ${builderPrimaryGoal === preset ? 'bg-app-text text-app-bg border-app-text font-bold' : 'bg-app-panel text-app-dim border-app-border hover:bg-app-bg hover:text-app-text'}`}>{preset}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-app-text uppercase mb-2">Selling Platform</label>
+                                        <input type="text" value={builderSellingPlatform} onChange={e => setBuilderSellingPlatform(e.target.value)} placeholder="Type or select below..." className="w-full bg-app-bg border border-app-border text-sm text-app-text rounded-lg px-3 py-2 mb-2 focus:outline-none focus:border-app-text transition-colors"/>
+                                        <div className="flex flex-wrap gap-2">
+                                            {sellingPlatformPresets.map(preset => (
+                                                <button key={preset} onClick={() => setBuilderSellingPlatform(preset)} className={`px-2 py-1 text-[10px] rounded-md border transition-colors ${builderSellingPlatform === preset ? 'bg-app-text text-app-bg border-app-text font-bold' : 'bg-app-panel text-app-dim border-app-border hover:bg-app-bg hover:text-app-text'}`}>{preset}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-app-text uppercase mb-2">Color Scheme</label>
+                                        <input type="text" value={builderColorScheme} onChange={e => setBuilderColorScheme(e.target.value)} placeholder="Type or select below..." className="w-full bg-app-bg border border-app-border text-sm text-app-text rounded-lg px-3 py-2 mb-2 focus:outline-none focus:border-app-text transition-colors"/>
+                                        <div className="flex flex-wrap gap-2">
+                                            {colorSchemePresets.map(preset => (
+                                                <button key={preset} onClick={() => setBuilderColorScheme(preset)} className={`px-2 py-1 text-[10px] rounded-md border transition-colors ${builderColorScheme === preset ? 'bg-app-text text-app-bg border-app-text font-bold' : 'bg-app-panel text-app-dim border-app-border hover:bg-app-bg hover:text-app-text'}`}>{preset}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-app-text uppercase mb-2">Promotion Strategy</label>
+                                        <input type="text" value={builderPromotionStrategy} onChange={e => setBuilderPromotionStrategy(e.target.value)} placeholder="Type or select below..." className="w-full bg-app-bg border border-app-border text-sm text-app-text rounded-lg px-3 py-2 mb-2 focus:outline-none focus:border-app-text transition-colors"/>
+                                        <div className="flex flex-wrap gap-2">
+                                            {promotionStrategyPresets.map(preset => (
+                                                <button key={preset} onClick={() => setBuilderPromotionStrategy(preset)} className={`px-2 py-1 text-[10px] rounded-md border transition-colors ${builderPromotionStrategy === preset ? 'bg-app-text text-app-bg border-app-text font-bold' : 'bg-app-panel text-app-dim border-app-border hover:bg-app-bg hover:text-app-text'}`}>{preset}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button 
+                                    onClick={() => handleIndependentBuilderGenerate(activeTool)}
+                                    className="w-full py-4 mt-8 bg-app-text text-app-bg font-bold rounded-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
+                                >
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                                    </svg>
+                                    Generate Final
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* mIPrOMPT Library Explorer Panel */}
+                    {(() => {
+                        const filteredMIPrompts = (miprompts || []).filter(item => {
+                            const matchesSearch = item.name.toLowerCase().includes(mipromptSearch.toLowerCase()) || 
+                                                  item.content.toLowerCase().includes(mipromptSearch.toLowerCase());
+                            const matchesFilter = mipromptFilter === 'all' || item.type === mipromptFilter;
+                            return matchesSearch && matchesFilter;
+                        }).sort((a, b) => b.createdAt - a.createdAt);
+
+                        return (
+                            <div className="lg:col-span-5 bg-app-card border border-app-border rounded-xl p-6 flex flex-col h-[740px] sticky top-6">
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="text-base font-bold text-app-text flex items-center gap-1.5">
+                                            <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                                            </svg>
+                                            mIPrOMPT Quick Access
+                                        </h3>
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-app-panel border border-app-border text-app-dim font-mono font-bold">
+                                            {filteredMIPrompts.length}
+                                        </span>
+                                    </div>
+                                    
+                                    {onOpenMIPrOMPT && (
+                                        <button 
+                                            onClick={onOpenMIPrOMPT}
+                                            className="text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-0.5"
+                                            title="Open library with CSV import/export"
+                                        >
+                                            Manage Library ↗
+                                        </button>
+                                    )}
+                                </div>
+                                <p className="text-[11px] text-app-dim mb-4 leading-relaxed">
+                                    Click a card to read its full text. Use the actions below each card to instantly load or append it into your active input text above.
+                                </p>
+
+                                {/* Search bar */}
+                                <div className="relative mb-3">
+                                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-app-dim">
+                                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                        </svg>
+                                    </div>
+                                    <input 
+                                        type="text" 
+                                        placeholder="Search custom library..." 
+                                        value={mipromptSearch} 
+                                        onChange={e => setMipromptSearch(e.target.value)} 
+                                        className="w-full bg-app-bg border border-app-border text-xs text-app-text focus:outline-none focus:border-app-text rounded-lg pl-8 pr-6 py-2 transition-colors" 
+                                    />
+                                    {mipromptSearch && (
+                                        <button 
+                                            onClick={() => setMipromptSearch('')}
+                                            className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-app-dim hover:text-app-text"
+                                        >
+                                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* Filter Tabs */}
+                                <div className="flex bg-app-bg rounded-lg p-0.5 border border-app-border mb-4 overflow-x-auto whitespace-nowrap">
+                                    {[
+                                        { id: 'all', label: 'All' },
+                                        { id: 'prB', label: 'Prompts' },
+                                        { id: 'ctB', label: 'Content' },
+                                        { id: 'txS', label: 'Summary' }
+                                    ].map(tab => (
+                                        <button
+                                            key={tab.id}
+                                            onClick={() => setMipromptFilter(tab.id as any)}
+                                            className={`flex-1 text-[10px] px-2 py-1 font-bold rounded transition-colors ${mipromptFilter === tab.id ? 'bg-app-text text-app-bg font-extrabold' : 'text-app-dim hover:text-app-text'}`}
+                                        >
+                                            {tab.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Custom Prompt List */}
+                                <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                                    {filteredMIPrompts.length === 0 ? (
+                                        <div className="text-center py-12 border border-dashed border-app-border rounded-xl text-app-dim space-y-2">
+                                            <svg className="w-8 h-8 text-app-dim mx-auto opacity-45" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                            </svg>
+                                            <p className="text-xs">No matching prompts found.</p>
+                                            {miprompts.length === 0 && (
+                                                <p className="text-[10px] text-app-dim/60 p-2">Your custom library is currently empty. Dictate or write some builder instructions on the left to save them!</p>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        filteredMIPrompts.map(item => {
+                                            const typeColor = item.type === 'prB' ? 'border-yellow-500/30 text-yellow-500 bg-yellow-500/10' :
+                                                              item.type === 'ctB' ? 'border-orange-500/30 text-orange-500 bg-orange-500/10' :
+                                                              'border-emerald-500/30 text-emerald-500 bg-emerald-500/10';
+                                            const typeLabel = item.type === 'prB' ? 'Prompt' :
+                                                              item.type === 'ctB' ? 'Content' :
+                                                              'Summary';
+                                            
+                                            // Clean name
+                                            const displayName = item.name.split('-').pop()?.replace(/_/g, ' ') || item.name;
+
+                                            return (
+                                                <div 
+                                                    key={item.id}
+                                                    className="bg-app-bg border border-app-border hover:border-app-text/30 rounded-xl p-3 space-y-2 transition-all flex flex-col"
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-1.5 max-w-[80%] min-w-0">
+                                                            <span className={`text-[9px] px-1.5 py-0.5 rounded border font-mono font-bold shrink-0 ${typeColor}`}>
+                                                                {typeLabel}
+                                                            </span>
+                                                            <span className="font-bold text-xs text-app-text truncate" title={item.name}>
+                                                                {displayName}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="flex items-center gap-1">
+                                                            {onDeleteMIPrOMPT && (
+                                                                <button 
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        if (true) {
+                                                                            onDeleteMIPrOMPT(item.id);
+                                                                        }
+                                                                    }}
+                                                                    className="p-1 hover:bg-red-500/10 text-app-dim hover:text-red-400 rounded transition-colors"
+                                                                    title="Delete Prompt"
+                                                                >
+                                                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                                    </svg>
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    <p className="text-xs text-app-dim select-text line-clamp-3 overflow-hidden leading-relaxed font-sans bg-black/20 p-2 rounded-lg border border-app-border/40 whitespace-pre-wrap">
+                                                        {item.content}
+                                                    </p>
+
+                                                    <div className="flex items-center justify-between pt-1 border-t border-app-border/40">
+                                                        <span className="text-[9px] text-app-dim/50 font-mono">
+                                                            {new Date(item.createdAt).toLocaleDateString()}
+                                                        </span>
+                                                        <div className="flex items-center gap-1.5">
+                                                            {/* Replace */}
+                                                            <button 
+                                                                onClick={() => {
+                                                                    setBuilderInput(item.content);
+                                                                    setSelectedTemplate(null);
+                                                                }}
+                                                                className="text-[10px] font-bold px-2 py-1 bg-app-panel text-app-text border border-app-border hover:border-app-text hover:bg-app-bg transition-all rounded"
+                                                                title="Replace active input with this prompt"
+                                                            >
+                                                                Replace
+                                                            </button>
+
+                                                            {/* Append */}
+                                                            <button 
+                                                                onClick={() => {
+                                                                    setBuilderInput(curr => curr ? `${curr}\n\n${item.content}` : item.content);
+                                                                    setSelectedTemplate(null);
+                                                                }}
+                                                                className="text-[10px] font-bold px-2 py-1 bg-gradient-to-r from-blue-600/30 to-purple-600/30 text-blue-300 hover:text-white border border-blue-500/20 hover:border-blue-500/40 rounded transition-all"
+                                                                title="Append this prompt to active input"
+                                                            >
+                                                                + Append
+                                                            </button>
+
+                                                            {/* Copy */}
+                                                            <button 
+                                                                onClick={() => {
+                                                                    navigator.clipboard.writeText(item.content);
+                                                                    setCopiedMipromptId(item.id);
+                                                                    setTimeout(() => setCopiedMipromptId(null), 1500);
+                                                                }}
+                                                                className={`text-[10px] font-bold px-2 py-1 rounded transition-all ${copiedMipromptId === item.id ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-app-panel text-app-dim border-app-border hover:text-app-text hover:bg-app-bg'}`}
+                                                                title="Copy content to clipboard"
+                                                            >
+                                                                {copiedMipromptId === item.id ? 'Copied' : 'Copy'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })()}
+                </div>
+                </div>
+            )}
+          </div>
+        )}
+
+        {/* History Modal */}
+        {showHistory && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+                <div className="bg-app-panel border border-app-border rounded-2xl p-6 w-full max-w-lg shadow-2xl animate-scale-in max-h-[80vh] flex flex-col">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xl font-bold text-app-text flex items-center gap-2">
+                            <svg className="w-5 h-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Podcast History
+                        </h3>
+                        <button onClick={() => setShowHistory(false)} className="text-app-dim hover:text-app-text">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                        {globalPodcastHistory.length === 0 ? (
+                            <div className="text-center py-10 text-app-dim border-2 border-dashed border-app-border rounded-xl">
+                                <p>No generated podcasts found.</p>
+                            </div>
+                        ) : (
+                            globalPodcastHistory.map(item => (
+                                <div 
+                                    key={item.id}
+                                    className="w-full p-3 bg-app-bg border border-app-border rounded-xl flex items-center justify-between gap-3 group transition-all"
+                                >
+                                    {editingItemId === item.id ? (
+                                        <div className="flex-1 flex items-center gap-2">
+                                            <input 
+                                                type="text"
+                                                value={editItemName}
+                                                onChange={(e) => setEditItemName(e.target.value)}
+                                                className="flex-1 bg-app-input border border-purple-500 rounded px-2 py-1 text-sm text-app-text focus:outline-none"
+                                                autoFocus
+                                            />
+                                            <button 
+                                                onClick={() => {
+                                                    if (editItemName.trim() && onRenameMediaItem) {
+                                                        onRenameMediaItem(item.id, editItemName.trim());
+                                                    }
+                                                    setEditingItemId(null);
+                                                }}
+                                                className="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold rounded transition-colors"
+                                            >
+                                                Save
+                                            </button>
+                                            <button 
+                                                onClick={() => setEditingItemId(null)}
+                                                className="px-2 py-1 bg-app-card hover:bg-app-border text-app-dim text-[10px] font-bold rounded transition-colors"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <button 
+                                                onClick={() => handleHistoryItemClick(item)}
+                                                className="flex-1 flex items-center gap-3 text-left min-w-0"
+                                            >
+                                                <div className="w-10 h-10 shrink-0 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-400 group-hover:bg-purple-500 group-hover:text-white transition-colors">
+                                                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <h4 className="font-bold text-app-text truncate text-sm">{item.name || (item as any).title || 'Untitled Audio'}</h4>
+                                                    <p className="text-[10px] text-app-dim">
+                                                        {(item as any).file ? new Date((item as any).file.lastModified).toLocaleString() : 'Saved Audio'}
+                                                    </p>
+                                                </div>
+                                            </button>
+                                            <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button 
+                                                    onClick={() => {
+                                                        setEditingItemId(item.id);
+                                                        setEditItemName(item.name || '');
+                                                    }}
+                                                    className="p-1.5 text-app-dim hover:text-purple-400 hover:bg-purple-500/10 rounded transition-colors"
+                                                    title="Rename"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                    </svg>
+                                                </button>
+                                                <button 
+                                                    onClick={() => {
+                                                        if (deleteConfirmId === item.id) {
+                                                            if (onRemoveMediaItem) onRemoveMediaItem(item.id);
+                                                            setDeleteConfirmId(null);
+                                                        } else {
+                                                            setDeleteConfirmId(item.id);
+                                                        }
+                                                    }}
+                                                    className={`p-1.5 rounded transition-all ${deleteConfirmId === item.id ? 'text-red-400 bg-red-500/20 font-bold px-2 animate-pulse scale-105' : 'text-app-dim hover:text-red-400 hover:bg-red-500/10'}`}
+                                                    title={deleteConfirmId === item.id ? "Click again to confirm delete" : "Delete"}
+                                                >
+                                                    {deleteConfirmId === item.id ? (
+                                                        <span className="text-[10px] uppercase tracking-wider font-extrabold text-red-500">Confirm?</span>
+                                                    ) : (
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Prompt Library Modal */}
+        {showPrompts && (
+            <PromptLibraryModal 
+                isOpen={showPrompts} 
+                onClose={() => setShowPrompts(false)}
+                prompts={prompts}
+                onSelect={(content) => {
+                    // Logic to use the prompt content
+                    // For now we can just log it or if there's an active input we could fill it
+                    console.log("Selected prompt:", content);
+                }}
+                onAdd={onAddPrompt}
+                onDelete={onDeletePrompt}
+            />
+        )}
+
+        
+        {isCastLibraryOpen && (
+            <CastLibraryModal
+                isOpen={isCastLibraryOpen}
+                onClose={() => setIsCastLibraryOpen(false)}
+                castLibrary={castLibrary}
+                voiceSettings={voiceSettings}
+                onResetVoiceSettings={() => {
+                    onUpdateVoiceSettings({
+                        ...voiceSettings,
+                        host: 'Kore',
+                        hostLabel: 'Narrator Bot',
+                        hostBio: 'A clear, authoritative, and friendly voice, perfect for hosting and guiding the listener through complex topics.',
+                        hostAvatar: 'https://picsum.photos/seed/narrator/60/60',
+                        hostMemberId: 'sys-host-1',
+                        expert: 'Zephyr',
+                        expertLabel: 'Dr. Insight',
+                        expertBio: 'A knowledgeable and articulate voice, ideal for explaining intricate details and offering expert opinions.',
+                        expertAvatar: 'https://picsum.photos/seed/expert/60/60',
+                        expertMemberId: 'sys-expert-1',
+                        guest: 'Puck',
+                        guestLabel: 'Curious Listener',
+                        guestBio: 'An engaging and inquisitive voice, representing the audience and asking clarifying questions.',
+                        guestAvatar: 'https://picsum.photos/seed/listener/60/60',
+                        guestMemberId: 'sys-guest-1'
+                    });
+                }}
+                onAssignRole={(role, member) => {
+                    const updates: Partial<VoiceSettings> = {};
+                    const isAlreadyAssigned = (role === 'host' && voiceSettings.hostMemberId === member.id) ||
+                                              (role === 'expert' && voiceSettings.expertMemberId === member.id) ||
+                                              (role === 'guest' && voiceSettings.guestMemberId === member.id);
+                    
+                    if (isAlreadyAssigned) {
+                        // Unselect logic - reset to defaults
+                        if (role === 'host') {
+                            updates.host = 'Puck';
+                            updates.hostLabel = 'Sax';
+                            updates.hostBio = 'A charismatic and engaging host who guides the conversation.';
+                            updates.hostAvatar = undefined;
+                            updates.hostMemberId = undefined;
+                        } else if (role === 'expert') {
+                            updates.expert = 'Kore';
+                            updates.expertLabel = 'Chameleon';
+                            updates.expertBio = 'A knowledgeable subject matter expert who provides deep insights.';
+                            updates.expertAvatar = undefined;
+                            updates.expertMemberId = undefined;
+                        } else if (role === 'guest') {
+                            updates.guest = 'Fenrir';
+                            updates.guestLabel = 'The Pinpoint';
+                            updates.guestBio = 'A special guest with a unique perspective.';
+                            updates.guestAvatar = undefined;
+                            updates.guestMemberId = undefined;
+                        }
+                    } else {
+                        // Select logic
+                        if (role === 'host') {
+                            updates.host = member.voice;
+                            updates.hostLabel = member.name;
+                            updates.hostBio = member.bio;
+                            updates.hostAvatar = member.avatar;
+                            updates.hostMemberId = member.id;
+                        } else if (role === 'expert') {
+                            updates.expert = member.voice;
+                            updates.expertLabel = member.name;
+                            updates.expertBio = member.bio;
+                            updates.expertAvatar = member.avatar;
+                            updates.expertMemberId = member.id;
+                        } else if (role === 'guest') {
+                            updates.guest = member.voice;
+                            updates.guestLabel = member.name;
+                            updates.guestBio = member.bio;
+                            updates.guestAvatar = member.avatar;
+                            updates.guestMemberId = member.id;
+                        }
+                    }
+                    onUpdateVoiceSettings({ ...voiceSettings, ...updates });
+                }}
+                onAdd={onAddCastMember}
+                onUpdate={onUpdateCastMember}
+                onDelete={onDeleteCastMember}
+            />
+        )}
+      </div>
+    
+      
+    
+      <ToolOrderSettingsModal
+        isOpen={isToolSettingsOpen}
+        onClose={() => setIsToolSettingsOpen(false)}
+        tools={tools}
+        toolOrder={toolOrder}
+        onSave={handleSaveOrder}
+      />
+</div>
+  );
+};
+
+export default StudioView;
