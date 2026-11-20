@@ -101,7 +101,7 @@ export const AISentimentTerminal: React.FC<{ theme?: string }> = ({ theme = 'cha
         method: 'POST',
         headers,
         body: JSON.stringify({
-          model: 'gemini-3.5-flash',
+          model: 'gemini-3.8-flash',
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           config: {
             responseMimeType: 'application/json',

@@ -376,7 +376,7 @@ export const StockPortfolioTracker: React.FC<StockPortfolioTrackerProps> = ({
     `;
 
     try {
-      const result = await generateResponse(query, [], [], 'gemini-3.5-flash');
+      const result = await generateResponse(query, [], [], 'gemini-3.8-flash');
       setAiReport(result.text);
     } catch (err: any) {
       console.error('Failed to generate stock portfolio diagnostic', err);

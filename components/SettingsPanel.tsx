@@ -241,7 +241,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       hue: 0, 
       textSize: 100,
       showLabels: true,
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.8-flash',
       provider: 'gemini',
       enableCaching: false,
       geminiApiKey: '',
@@ -429,16 +429,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         <p className="text-[10px] text-app-dim mb-1">Select Gemini Model Class:</p>
                         <div className="grid grid-cols-3 gap-2">
                           <button
-                            onClick={() => onUpdateSettings({ ...settings, model: 'gemini-3.5-flash' })}
-                            className={`py-2 text-xs font-medium rounded-md border transition-all ${(!settings.model || settings.model === 'gemini-3.5-flash') ? 'border-app-text text-app-text bg-app-text/10' : 'border-app-border text-app-muted hover:border-app-dim'}`}
+                            onClick={() => onUpdateSettings({ ...settings, model: 'gemini-3.8-flash' })}
+                            className={`py-2 text-xs font-medium rounded-md border transition-all ${(!settings.model || settings.model === 'gemini-3.8-flash' || settings.model === 'gemini-3.5-flash' || settings.model === 'gemini-2.5-flash') ? 'border-app-text text-app-text bg-app-text/10' : 'border-app-border text-app-muted hover:border-app-dim'}`}
                           >
-                            Flash 3.5
+                            Flash 3.8
                           </button>
                           <button
-                            onClick={() => onUpdateSettings({ ...settings, model: 'gemini-3.1-pro-preview' })}
-                            className={`py-2 text-xs font-medium rounded-md border transition-all ${settings.model === 'gemini-3.1-pro-preview' ? 'border-app-text text-app-text bg-app-text/10' : 'border-app-border text-app-muted hover:border-app-dim'}`}
+                            onClick={() => onUpdateSettings({ ...settings, model: 'gemini-4-argon' })}
+                            className={`py-2 text-xs font-medium rounded-md border transition-all ${(settings.model === 'gemini-4-argon' || settings.model === 'gemini-3.1-pro-preview') ? 'border-app-text text-app-text bg-app-text/10' : 'border-app-border text-app-muted hover:border-app-dim'}`}
                           >
-                            Pro 3.1
+                            Pro 4 (Argon)
                           </button>
                           <button
                             onClick={() => onUpdateSettings({ ...settings, model: 'gemini-3.1-flash-lite' })}

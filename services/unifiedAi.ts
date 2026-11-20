@@ -33,7 +33,7 @@ export const generateUnifiedAIResponse = async (prompt: string, mediaItems: Medi
         );
         return result.text;
       } else {
-        const model = settings.model || 'gemini-3.5-flash';
+        const model = settings.model || 'gemini-3.8-flash';
         const result = await generateGeminiResponse(prompt, [], mediaItems, model);
         return result.text;
       }
@@ -43,6 +43,6 @@ export const generateUnifiedAIResponse = async (prompt: string, mediaItems: Medi
   }
 
   // Fallback to default Gemini
-  const response = await generateGeminiResponse(prompt, [], mediaItems, 'gemini-3.5-flash');
+  const response = await generateGeminiResponse(prompt, [], mediaItems, 'gemini-3.8-flash');
   return response.text;
 };

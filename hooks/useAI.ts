@@ -105,7 +105,7 @@ export const useAI = (
                  items
              );
           } else {
-             const model = settings.model || 'gemini-3-flash-preview';
+             const model = settings.model || 'gemini-3.8-flash';
              qs = await generateGeminiSuggestions(items, model);
           }
           updateSessionById(sessionId, s => ({ ...s, suggestions: qs }));
@@ -119,7 +119,7 @@ export const useAI = (
     const autoTagMediaItems = useCallback(async (sessionId: string, items: MediaItem[]) => {
         if (items.length === 0 || settings.provider !== 'gemini') return;
         
-        const model = settings.model || 'gemini-3-flash-preview';
+        const model = settings.model || 'gemini-3.8-flash';
         
         for (const item of items) {
             // Already tagged or empty
@@ -215,7 +215,7 @@ export const useAI = (
             );
             responseText = result.text;
           } else {
-            const model = settings.model || 'gemini-3-flash-preview';
+            const model = settings.model || 'gemini-3.8-flash';
             
             let cachedContentName = undefined;
             if (settings.enableCaching && activeMediaItems.length > 0) {
@@ -292,7 +292,7 @@ export const useAI = (
             );
             
             // Only support Gemini for MindMap currently due to JSON structure requirements
-            const model = settings.model || 'gemini-3-flash-preview';
+            const model = settings.model || 'gemini-3.8-flash';
             const graph = await generateMindMapJson(activeMediaItems, model);
             
             if (graph) {

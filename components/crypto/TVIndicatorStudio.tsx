@@ -699,7 +699,7 @@ ${plotsBlock}
     `;
 
     try {
-      const response = await generateResponse(sysPrompt, [], [], 'gemini-3.5-flash');
+      const response = await generateResponse(sysPrompt, [], [], 'gemini-3.8-flash');
       if (response && response.text) {
         let cleanCode = response.text
           .replace(/^```pinescript\s*/i, '')
@@ -1110,7 +1110,7 @@ ${plotsBlock}
     `;
 
     try {
-      const response = await generateResponse(sysPrompt, [], [], 'gemini-3.5-flash');
+      const response = await generateResponse(sysPrompt, [], [], 'gemini-3.8-flash');
       if (response && response.text) {
         // Clean out any leftover markdown markers if Gemini returned them
         let cleanCode = response.text

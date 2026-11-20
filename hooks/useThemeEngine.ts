@@ -47,7 +47,7 @@ const DEFAULT_SETTINGS: ThemeSettings = {
   textSize: 100,
   showLabels: true,
   provider: 'gemini',
-  model: 'gemini-3.5-flash',
+  model: 'gemini-3.8-flash',
   enableCaching: false,
   geminiApiKey: '',
   ollamaEndpoint: 'https://than-conflict-caught-asthma.trycloudflare.com',
@@ -151,7 +151,15 @@ export const useThemeEngine = () => {
 
         const savedSettings = localStorage.getItem(SETTINGS_KEY);
         if (savedSettings) {
-            setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
+            try {
+                const parsed = JSON.parse(savedSettings);
+                if (!parsed.model || parsed.model === 'gemini-3.5-flash' || parsed.model === 'gemini-2.5-flash' || parsed.model.startsWith('gemini-2.') || parsed.model.startsWith('gemini-1.')) {
+                    parsed.model = 'gemini-3.8-flash';
+                }
+                setSettings({ ...DEFAULT_SETTINGS, ...parsed });
+            } catch (e) {
+                setSettings(DEFAULT_SETTINGS);
+            }
         }
     }, []);
 

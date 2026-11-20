@@ -24,6 +24,7 @@ import { useMIPrOMPTLibrary } from './hooks/useMIPrOMPTLibrary';
 import { useCastLibrary } from './hooks/useCastLibrary';
 import { useCharacterLibrary } from './hooks/useCharacterLibrary';
 import { generateResponse, generateSpeech, searchWeb, chunkText, base64ToText, translateText } from './services/gemini'; 
+import { saveAudioBlobToIDB, loadAudioBlobFromIDB } from './services/storage'; 
 
 const App: React.FC = () => {
   const { theme, setTheme, settings, setSettings } = useThemeEngine();
@@ -316,36 +317,70 @@ const App: React.FC = () => {
   };
 
   const saveGlobalHistorySafely = (history: any[]) => {
+      if (!Array.isArray(history)) return;
+
+      // 1. Asynchronously persist full audio data to IndexedDB so large WAV blobs are never lost
+      history.forEach(item => {
+          if (item?.id && item?.data && typeof item.data === 'string' && item.data.length > 500) {
+              saveAudioBlobToIDB(item.id, item.data, item.scriptHtml).catch(() => {});
+          }
+      });
+
+      // 2. Prepare lightweight history for localStorage (strip heavy base64 strings)
+      // localStorage has a strict ~5MB origin quota. Large audio WAVs (1-10MB) must NOT be stored directly in localStorage.
+      const sanitizeItem = (item: any, keepData = false) => ({
+          ...item,
+          data: keepData && item.data && typeof item.data === 'string' && item.data.length < 50000 ? item.data : undefined,
+          hasAudioData: !!(item.data || item.file),
+          scriptHtml: item.scriptHtml && typeof item.scriptHtml === 'string' && item.scriptHtml.length > 2000 
+              ? item.scriptHtml.substring(0, 1000) + '<!-- truncated for storage -->' 
+              : item.scriptHtml
+      });
+
+      // Tier 1: Try saving sanitized history (keeping only light metadata for items)
       try {
-          localStorage.setItem('global_podcast_history', JSON.stringify(history));
+          const sanitized = history.slice(0, 30).map((item, idx) => sanitizeItem(item, idx === 0));
+          localStorage.setItem('global_podcast_history', JSON.stringify(sanitized));
           window.dispatchEvent(new Event('global_podcast_history_updated'));
-      } catch (e: any) {
-          if (e.name === 'QuotaExceededError' || e.code === 22 || String(e).includes('quota') || String(e).includes('QuotaExceeded')) {
-              console.warn("Storage quota exceeded. Pruning older heavy media content in global history...");
-              // Prune older entries' heavy base64 data to save space, keeping only metadata or removing them
-              const pruned = history.map((item, index) => {
-                  if (index < 5) return item; // Keep top 5 fully intact
-                  return {
-                      ...item,
-                      data: undefined, // Strip large base64 data
-                      scriptHtml: item.scriptHtml ? "<!-- content stripped to save space -->" : undefined
-                  };
-              });
-              try {
-                  localStorage.setItem('global_podcast_history', JSON.stringify(pruned));
-                  window.dispatchEvent(new Event('global_podcast_history_updated'));
-              } catch (retryErr) {
-                  // If still failing, keep only the latest 3 items
-                  const minimal = pruned.slice(0, 3);
-                  try {
-                      localStorage.setItem('global_podcast_history', JSON.stringify(minimal));
-                      window.dispatchEvent(new Event('global_podcast_history_updated'));
-                  } catch (ultimateErr) {
-                      console.error("Failed to save even minimal history:", ultimateErr);
-                  }
-              }
-          } else {
-              console.error("Failed to save to global podcast history:", e);
+          return;
+      } catch (e1) {
+          console.warn("Storage quota exceeded in Tier 1. Stripping all audio payloads from localStorage history...");
+      }
+
+      // Tier 2: Strip ALL data and truncate scriptHtml for all items
+      try {
+          const minimal = history.slice(0, 15).map(item => ({
+              id: item.id,
+              type: item.type,
+              name: item.name,
+              mimeType: item.mimeType,
+              hasAudioData: true,
+              scriptHtml: item.scriptHtml && typeof item.scriptHtml === 'string' ? item.scriptHtml.substring(0, 300) : undefined
+          }));
+          localStorage.setItem('global_podcast_history', JSON.stringify(minimal));
+          window.dispatchEvent(new Event('global_podcast_history_updated'));
+          return;
+      } catch (e2) {
+          console.warn("Storage quota exceeded in Tier 2. Keeping top 5 minimal records...");
+      }
+
+      // Tier 3: Keep only top 5 lightweight metadata records
+      try {
+          const ultraMinimal = history.slice(0, 5).map(item => ({
+              id: item.id,
+              type: item.type,
+              name: item.name,
+              mimeType: item.mimeType,
+              hasAudioData: true
+          }));
+          localStorage.setItem('global_podcast_history', JSON.stringify(ultraMinimal));
+          window.dispatchEvent(new Event('global_podcast_history_updated'));
+      } catch (e3) {
+          // Tier 4: Clear older non-critical keys if completely blocked
+          try {
+              localStorage.removeItem('global_podcast_history');
+          } catch (e4) {
+              /* completely silent failover to prevent unhandled crash */
           }
       }
   };
@@ -846,7 +881,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
          prompt += " IMPORTANT: Return ONLY the raw HTML code starting with <!DOCTYPE html>. Ensure it is self-contained with internal CSS.";
      }
      try {
-        const model = settings.model || 'gemini-3.5-flash';
+        const model = settings.model || 'gemini-3.8-flash';
         const cacheName = (toolId === 'youtube_transcript' || toolId === 'text_summarizer') ? undefined : activeSession.geminiCacheName;
         
         let code = "";
@@ -1084,7 +1119,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
               activeSession.selectedMediaIds.includes(item.id)
           ) || [];
           const prompt = `Tell me more about "${label}" and its context based on the sources. Provide a detailed summary and analysis.`;
-          const model = settings.model || 'gemini-3.5-flash';
+          const model = settings.model || 'gemini-3.8-flash';
           const result = await generateResponse(prompt, [], activeMediaItems, model, activeSession?.geminiCacheName);
           setMindMapPopup({ title: label, content: result.text, isLoading: false });
       } catch (e) {
@@ -1138,9 +1173,34 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
 
   const handleLoadAudio = async (item: MediaItem) => {
       if (item.type !== 'audio') return;
-      setPreviewCode(item.scriptHtml || '<!-- Audio Only Mode -->');
-      if (item.data) {
-          setGeneratedAudio(item.data);
+      
+      let audioData = item.data;
+      let scriptCode = item.scriptHtml;
+
+      // If data is stripped from lightweight history in localStorage, recover it
+      if (!audioData) {
+          const foundInSession = activeSession?.mediaItems.find(m => m.id === item.id) 
+              || sessions.flatMap(s => s.mediaItems).find(m => m.id === item.id);
+          if (foundInSession?.data) {
+              audioData = foundInSession.data;
+              if (!scriptCode && foundInSession.scriptHtml) {
+                  scriptCode = foundInSession.scriptHtml;
+              }
+          } else {
+              const cachedBlob = await loadAudioBlobFromIDB(item.id);
+              if (cachedBlob?.data) {
+                  audioData = cachedBlob.data;
+                  if (!scriptCode && cachedBlob.scriptHtml) {
+                      scriptCode = cachedBlob.scriptHtml;
+                  }
+              }
+          }
+      }
+
+      setPreviewCode(scriptCode || '<!-- Audio Only Mode -->');
+      
+      if (audioData) {
+          setGeneratedAudio(audioData);
       } else if ((item as any).file) {
           const file = (item as any).file as File;
           const reader = new FileReader();

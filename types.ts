@@ -111,7 +111,7 @@ export interface ThemeSettings {
   provider: 'gemini' | 'ollama' | 'custom';
   
   // Gemini Specific
-  model: string;          // 'gemini-3.5-flash' | 'gemini-3.1-pro-preview' | 'gemini-3.1-flash-lite'
+  model: string;          // 'gemini-3.8-flash' | 'gemini-4-argon' | 'gemini-3.1-flash-lite'
   enableCaching: boolean; // Context Caching toggle
   autoTagSources?: boolean; // Auto-tag uploaded sources
   geminiApiKey?: string;  // Custom Gemini API Key

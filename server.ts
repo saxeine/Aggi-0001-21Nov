@@ -38,16 +38,16 @@ const formatGeminiError = (error: any) => {
     return 'Invalid API Key. Please check your GEMINI_API_KEY in settings.';
   }
 
-  if (msg.includes("exceeded your current quota") || msg.includes("check your plan and billing details") || msg.includes("GenerateRequestsPerDay") || msg.includes("free_tier_requests")) {
-    return 'Gemini API Account Quota Exceeded. You have exceeded your billing plan quota or daily limits. Please check your plan and billing details at Google AI Studio.';
+  if (msg.includes("GenerateRequestsPerDay") || msg.includes("free_tier_requests") || msg.includes("Daily quota")) {
+    return 'Gemini API Daily Quota Exceeded. You have exceeded your daily requests limit. You can add your own Gemini API key in Settings.';
   }
   
   if (msg.toLowerCase().includes('quota') || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
-    return 'Gemini API Quota Exceeded. The free tier has a limit of 15 requests per minute. Please wait 60 seconds and try again.';
+    return 'Gemini API Quota Exceeded (429 Resource Exhausted). The free tier rate limit was reached. Please wait a moment or configure your custom Gemini API key in Settings.';
   }
 
   if (msg.includes('503') || msg.includes('Service Unavailable') || msg.includes('DeadlineExceeded')) {
-    return 'Gemini Service is temporarily overloaded. We are retrying... Please wait.';
+    return 'Gemini Service is temporarily overloaded. Please try again in a few moments.';
   }
 
   // Try to parse JSON if the error message is a stringified object
@@ -64,7 +64,7 @@ const formatGeminiError = (error: any) => {
 };
 
 let lastRequestTime = 0;
-const MIN_REQUEST_SPACING = 4500; // 4.5 seconds to safely stay under 15 RPM
+const MIN_REQUEST_SPACING = 3000; // 3 seconds spacing to help stay within rate limits
 const queue: (() => Promise<void>)[] = [];
 let activeRequests = 0;
 const MAX_CONCURRENT = 1;
@@ -105,7 +105,7 @@ const runInQueue = async <T>(fn: () => Promise<T>): Promise<T> => {
 
 
 // Retry wrapper for API calls
-const callWithRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> => {
+const callWithRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000): Promise<T> => {
   try {
     return await fn();
   } catch (error: any) {
@@ -116,23 +116,19 @@ const callWithRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000)
     if (error && error.details) {
       const retryInfo = error.details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
       if (retryInfo && retryInfo.retryDelay) {
-        // RetryInfo.retryDelay is a duration string like "8s" or "1.181391691s"
         const seconds = parseFloat(retryInfo.retryDelay);
         retryDelay = seconds * 1000;
-        console.log(`[Status] Adjusting delay to ${retryDelay}ms`);
+        console.log(`[Status] Adjusting retry delay to ${retryDelay}ms`);
       }
     }
 
-    // Check if the message indicates a permanent daily quota exhaustion
+    // Check if the message indicates a permanent daily limit
     const isDailyQuotaExceeded = msg.includes("GenerateRequestsPerDay") || 
                                  msg.includes("free_tier_requests") || 
-                                 msg.includes("limit: 20") ||
-                                 msg.includes("exceeded your current quota") ||
-                                 msg.includes("check your plan and billing details") ||
-                                 msg.includes("Quota exceeded");
+                                 msg.includes("limit: 20");
 
     if (isDailyQuotaExceeded) {
-      console.log("[Status] Daily/Account Quota limit reached. Halting.");
+      console.log("[Status] Daily request limit reached. Halting retry.");
       throw error;
     }
     
@@ -150,15 +146,14 @@ const callWithRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000)
     if (retries > 0 && isRetriable) {
       console.log(`[Status] Request deferred (${msg.substring(0, 50)}...). Scheduling re-attempt in ${retryDelay}ms... (${retries} attempts remaining)`);
       await new Promise(res => setTimeout(res, retryDelay));
-      // Increase delay with jitter and exponential backoff
-      const nextDelay = retryDelay * 1.5 + Math.random() * 1500;
+      const nextDelay = retryDelay * 1.5 + Math.random() * 1000;
       return callWithRetry(fn, retries - 1, nextDelay); 
     }
     throw error;
   }
 };
 
-// Robust Generate Content helper with model fallback for high-availability
+// Robust Generate Content helper with multi-model fallback for high-availability
 const generateContentWithFallback = async (
   ai: ReturnType<typeof getAiClient>,
   params: any,
@@ -186,34 +181,16 @@ const generateContentWithFallback = async (
                            msg.includes("QuotaExceeded");
 
     if (isServiceIssue) {
-      let fallbackModel = "gemini-3.1-flash-lite"; // Ultra-stable modern fallback by default
-      if (originalModel.includes("pro")) {
-        fallbackModel = "gemini-3.5-flash"; // Fallback from pro to flash
-      } else if (originalModel === "gemini-3.5-flash") {
-        fallbackModel = "gemini-3.1-flash-lite"; // Fallback from newest flash to stable lite
-      }
-
-      if (fallbackModel && fallbackModel !== originalModel) {
-        console.log(`[Routing] Primary model ${originalModel} unavailable. Switching immediately to fallback ${fallbackModel}...`);
-        const fallbackParams = { ...params, model: fallbackModel };
-        try {
-          return await callWithRetry(async () => {
-            return await ai.models.generateContent(fallbackParams);
-          }, 1, 1000); // 1 fast retry for fallback
-        } catch (fbError: any) {
-          console.log(`[Routing] Secondary model ${fallbackModel} not responding. Moving to ultra-stable fallback...`);
-          // If fallback fails and is not gemini-3.1-flash-lite, try gemini-3.1-flash-lite as an extreme fallback measure
-          if (fallbackModel !== "gemini-3.1-flash-lite") {
-            try {
-              console.log(`[Routing] Fallback to 'gemini-3.1-flash-lite' to recover...`);
-              return await callWithRetry(async () => {
-                return await ai.models.generateContent({ ...params, model: "gemini-3.1-flash-lite" });
-              }, 1, 1000);
-            } catch (ultimateError) {
-              throw fbError;
-            }
+      const fallbackCandidates = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+      for (const fallbackModel of fallbackCandidates) {
+        if (fallbackModel !== originalModel) {
+          console.log(`[Routing] Primary model ${originalModel} had issue (${msg.substring(0, 40)}...). Trying fallback ${fallbackModel}...`);
+          try {
+            const fallbackParams = { ...params, model: fallbackModel };
+            return await runInQueue(async () => await ai.models.generateContent(fallbackParams));
+          } catch (fbErr: any) {
+            console.log(`[Routing] Fallback model ${fallbackModel} failed: ${fbErr.message || fbErr}`);
           }
-          throw fbError;
         }
       }
     }
@@ -223,30 +200,31 @@ const generateContentWithFallback = async (
 
 // Normalize model names to production-ready versions
 const normalizeModel = (model: string): string => {
-  if (!model) return 'gemini-3.5-flash';
+  if (!model) return 'gemini-3.8-flash';
   const norm = model.toLowerCase();
   
   if (
+    norm.includes('gemini-3.8-flash') ||
+    norm.includes('gemini-flash-latest') ||
     norm.includes('gemini-3.5-flash') ||
     norm.includes('gemini-3-flash') ||
+    norm.includes('gemini-2.5-flash') ||
     norm.includes('gemini-2.0-flash') ||
-    norm.includes('gemini-flash-latest') ||
-    norm.includes('gemini-3.5-flash-preview')
+    norm.includes('gemini-flash') ||
+    norm === 'flash'
   ) {
-    return 'gemini-3.5-flash';
+    return 'gemini-3.8-flash';
   }
   
   if (
-    norm.includes('gemini-3.1-pro-preview') ||
+    norm.includes('gemini-4-argon') ||
+    norm.includes('gemini-3.1-pro') ||
     norm.includes('gemini-3-pro') ||
     norm.includes('gemini-2.5-pro') ||
-    norm.includes('gemini-2.0-pro') ||
-    norm.includes('gemini-1.5-pro') ||
-    norm.includes('gemini-pro-latest') ||
-    norm.includes('gemini-3-pro-preview') ||
-    norm.includes('gemini-2.5-pro-preview')
+    norm.includes('gemini-pro') ||
+    norm === 'pro'
   ) {
-    return 'gemini-3.1-pro-preview';
+    return 'gemini-4-argon';
   }
   
   if (norm.includes('flash-lite') || norm.includes('lite')) {
@@ -286,7 +264,7 @@ Format Instructions:
 4. Output only the plain script content, no wrapping markdown blocks (like \`\`\`fountain or \`\`\`text) or conversational text.`;
 
     const response = await generateContentWithFallback(ai, {
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.8-flash',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
     });
 
@@ -325,7 +303,7 @@ Output your response strictly as a JSON array of objects with the exact schema. 
 Each object must have the fields: "sceneNo", "shotNo", "shotType", "duration", "action", "dialogue", "notes".`;
 
     const response = await generateContentWithFallback(ai, {
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.8-flash',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json'
@@ -422,7 +400,7 @@ app.post('/api/custom-ai', async (req, res) => {
 
 app.post('/api/gemini/bring-to-life', async (req, res) => {
   try {
-    const { prompt, imageBase64, mimeType, modelName = 'gemini-3.5-flash' } = req.body;
+    const { prompt, imageBase64, mimeType, modelName = 'gemini-3.8-flash' } = req.body;
     const ai = getAiClient(req);
     const parts: any[] = [];
 
@@ -466,7 +444,7 @@ app.post('/api/gemini/bring-to-life', async (req, res) => {
 
 app.post('/api/gemini/generate', async (req, res) => {
   try {
-    const { contents, config, model = 'gemini-3.5-flash' } = req.body;
+    const { contents, config, model = 'gemini-3.8-flash' } = req.body;
     const ai = getAiClient(req);
     const finalModel = normalizeModel(model);
     const response = await generateContentWithFallback(ai, {
@@ -491,7 +469,13 @@ app.post('/api/gemini/generate', async (req, res) => {
     console.error('Gemini Generate Error:', error);
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-store, max-age=0');
-    res.status(error.message?.includes('API key') ? 401 : 500).json({ error: formatGeminiError(error) });
+    const isQuota = String(error.message || '').includes('quota') || 
+                    String(error.message || '').includes('429') || 
+                    String(error.message || '').includes('RESOURCE_EXHAUSTED');
+    res.status(error.message?.includes('API key not valid') ? 401 : isQuota ? 429 : 500).json({ 
+      error: formatGeminiError(error),
+      code: isQuota ? 'QUOTA_EXCEEDED' : 'GENERATE_ERROR'
+    });
   }
 });
 
@@ -842,7 +826,7 @@ Each object in the array MUST have the following structure:
 Only output the raw JSON array of objects.`;
 
     const response = await generateContentWithFallback(ai, {
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.8-flash',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json'

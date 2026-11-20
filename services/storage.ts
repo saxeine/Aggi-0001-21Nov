@@ -5,9 +5,10 @@ import { collection, getDocs, doc, writeBatch, setDoc, deleteDoc } from 'firebas
 const COLLECTION_NAME = 'sessions';
 const IDB_NAME = 'GeminiMediaAggregatorDB';
 const IDB_STORE = 'sessions';
-const IDB_VERSION = 1;
+const IDB_AUDIO_STORE = 'audio_blobs';
+const IDB_VERSION = 2;
 
-// --- INDEXED DB HELPERS (Fallback) ---
+// --- INDEXED DB HELPERS (Fallback & Large Asset Storage) ---
 const openIDB = (): Promise<IDBDatabase> => {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(IDB_NAME, IDB_VERSION);
@@ -16,10 +17,45 @@ const openIDB = (): Promise<IDBDatabase> => {
             if (!d.objectStoreNames.contains(IDB_STORE)) {
                 d.createObjectStore(IDB_STORE, { keyPath: 'id' });
             }
+            if (!d.objectStoreNames.contains(IDB_AUDIO_STORE)) {
+                d.createObjectStore(IDB_AUDIO_STORE, { keyPath: 'id' });
+            }
         };
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
     });
+};
+
+export const saveAudioBlobToIDB = async (id: string, data: string, scriptHtml?: string): Promise<void> => {
+    try {
+        const idb = await openIDB();
+        if (!idb.objectStoreNames.contains(IDB_AUDIO_STORE)) return;
+        const tx = idb.transaction(IDB_AUDIO_STORE, 'readwrite');
+        const store = tx.objectStore(IDB_AUDIO_STORE);
+        store.put({ id, data, scriptHtml, updatedAt: Date.now() });
+        await new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) {
+        console.warn("Could not save audio blob to IndexedDB:", e);
+    }
+};
+
+export const loadAudioBlobFromIDB = async (id: string): Promise<{ data?: string, scriptHtml?: string } | null> => {
+    try {
+        const idb = await openIDB();
+        if (!idb.objectStoreNames.contains(IDB_AUDIO_STORE)) return null;
+        const tx = idb.transaction(IDB_AUDIO_STORE, 'readonly');
+        const store = tx.objectStore(IDB_AUDIO_STORE);
+        const req = store.get(id);
+        return new Promise((resolve) => {
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
+        });
+    } catch (e) {
+        return null;
+    }
 };
 
 // --- GENERAL FIRESTORE UTILITIES FOR ALL ASSETS ---

@@ -420,7 +420,7 @@ You MUST return ONLY a valid raw JSON object matching the following TypeScript s
   ]
 }`;
 
-        const result = await generateResponse(sysPrompt, [], activeMediaItems, 'gemini-3.5-flash');
+        const result = await generateResponse(sysPrompt, [], activeMediaItems, 'gemini-3.8-flash');
         let cleanText = result.text.trim();
         const codeBlockMatch = cleanText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
         if (codeBlockMatch) {
