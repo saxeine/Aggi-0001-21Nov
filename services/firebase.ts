@@ -84,71 +84,70 @@ if (!firebaseEnabled) {
   );
   isFirebaseAvailable = false;
   firebaseReadyPromise = Promise.resolve(false);
-}
-
-try {
-  if (!firebaseEnabled) throw new Error('Firebase config not configured');
-  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-  db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-  auth = getAuth(app);
-  
-  let resolveAuthReady: (value: any) => void = () => {};
-  authReadyPromise = new Promise((resolve) => {
-    resolveAuthReady = resolve;
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        resolve(user);
-        unsubscribe();
-      }
+} else {
+  try {
+    const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+    db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    auth = getAuth(app);
+    
+    let resolveAuthReady: (value: any) => void = () => {};
+    authReadyPromise = new Promise((resolve) => {
+      resolveAuthReady = resolve;
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (user) {
+          resolve(user);
+          unsubscribe();
+        }
+      });
+      // Fallback timeout to prevent infinite hang if network is slow or auth is restricted
+      setTimeout(() => {
+        resolve(null);
+      }, 4000);
     });
-    // Fallback timeout to prevent infinite hang if network is slow or auth is restricted
-    setTimeout(() => {
-      resolve(null);
-    }, 4000);
-  });
 
-  firebaseReadyPromise = (async () => {
-    try {
-      // 1. Try to sign in anonymously
-      const user = await signInAnonymously(auth)
-        .then((userCredential) => {
-          console.log("Firebase: Signed in anonymously as", userCredential.user.uid);
-          return userCredential.user;
-        })
-        .catch((error) => {
-          console.warn("Firebase Auth failed (anonymous auth restricted in project settings). Using robust Local Storage / IDB fallback.", error);
-          resolveAuthReady(null);
-          return null;
-        });
+    firebaseReadyPromise = (async () => {
+      try {
+        // 1. Try to sign in anonymously
+        const user = await signInAnonymously(auth)
+          .then((userCredential) => {
+            console.log("Firebase: Signed in anonymously as", userCredential.user.uid);
+            return userCredential.user;
+          })
+          .catch((error) => {
+            console.warn("Firebase Auth failed (anonymous auth restricted in project settings). Using robust Local Storage / IDB fallback.", error);
+            resolveAuthReady(null);
+            return null;
+          });
 
-      if (!user) {
+        if (!user) {
+          isFirebaseAvailable = false;
+          return false;
+        }
+
+        // 2. Wait for auth state to propagate
+        await authReadyPromise;
+
+        // 3. Perform a quick permissions/connection check
+        const isConnected = await testConnection();
+        if (!isConnected) {
+          isFirebaseAvailable = false;
+          return false;
+        }
+
+        isFirebaseAvailable = true;
+        return true;
+      } catch (e) {
+        console.warn("Firebase initialization flow failed. Falling back to local storage.", e);
         isFirebaseAvailable = false;
+        resolveAuthReady(null);
         return false;
       }
-
-      // 2. Wait for auth state to propagate
-      await authReadyPromise;
-
-      // 3. Perform a quick permissions/connection check
-      const isConnected = await testConnection();
-      if (!isConnected) {
-        isFirebaseAvailable = false;
-        return false;
-      }
-
-      isFirebaseAvailable = true;
-      return true;
-    } catch (e) {
-      console.warn("Firebase initialization flow failed. Falling back to local storage.", e);
-      isFirebaseAvailable = false;
-      resolveAuthReady(null);
-      return false;
-    }
-  })();
-} catch (error) {
-  console.error("Firebase init failed:", error);
-  isFirebaseAvailable = false;
-  firebaseReadyPromise = Promise.resolve(false);
+    })();
+  } catch (error) {
+    console.warn("Firebase init failed, using local storage fallback:", error);
+    isFirebaseAvailable = false;
+    firebaseReadyPromise = Promise.resolve(false);
+  }
 }
 
 async function testConnection(): Promise<boolean> {

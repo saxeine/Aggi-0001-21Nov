@@ -221,12 +221,14 @@ export default function SxaBoardTool({
       playbackTracks: []
     }));
     
-    setDoc(doc(db, 'storyboards', newId), {
-      slides: [],
-      folderName: name,
-      id: newId,
-      playbackTracks: []
-    }).catch(err => console.error(err));
+    if (db) {
+      setDoc(doc(db, 'storyboards', newId), {
+        slides: [],
+        folderName: name,
+        id: newId,
+        playbackTracks: []
+      }).catch(err => console.error(err));
+    }
     
     if (enableBeeps) triggerAudioBeep(650, 'sine', 0.15);
   };
@@ -244,12 +246,14 @@ export default function SxaBoardTool({
         playbackTracks: []
       }));
       
-      setDoc(doc(db, 'storyboards', storyboardId), {
-        slides: [],
-        folderName: 'My-Storyboard',
-        id: storyboardId,
-        playbackTracks: []
-      }).catch(err => console.error(err));
+      if (db) {
+        setDoc(doc(db, 'storyboards', storyboardId), {
+          slides: [],
+          folderName: 'My-Storyboard',
+          id: storyboardId,
+          playbackTracks: []
+        }).catch(err => console.error(err));
+      }
       
       if (enableBeeps) triggerAudioBeep(300, 'sine', 0.2);
     }
@@ -521,6 +525,25 @@ export default function SxaBoardTool({
   }, [activeLayout, isPlaying]);
 
   useEffect(() => {
+    const loadLocal = () => {
+      const localData = localStorage.getItem(`storyboard_${storyboardId}`);
+      if (localData) {
+        try {
+          const parsed = JSON.parse(localData);
+          setSlides(parsed.slides || []);
+          setFolderName(parsed.folderName || 'My-Storyboard');
+          setPlaybackTracks(parsed.playbackTracks || []);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+
+    if (!db) {
+      loadLocal();
+      return;
+    }
+
     const unsub = onSnapshot(doc(db, 'storyboards', storyboardId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -528,17 +551,7 @@ export default function SxaBoardTool({
         setFolderName(data.folderName || 'My-Storyboard');
         setPlaybackTracks(data.playbackTracks || []);
       } else {
-        const localData = localStorage.getItem(`storyboard_${storyboardId}`);
-        if (localData) {
-          try {
-            const parsed = JSON.parse(localData);
-            setSlides(parsed.slides || []);
-            setFolderName(parsed.folderName || 'My-Storyboard');
-            setPlaybackTracks(parsed.playbackTracks || []);
-          } catch (e) {
-            console.error(e);
-          }
-        }
+        loadLocal();
       }
     }, (error) => {
       console.error(error);
@@ -698,15 +711,17 @@ export default function SxaBoardTool({
     } catch (localErr) {
       console.error(localErr);
     }
-    try {
-      await setDoc(doc(db, 'storyboards', storyboardId), {
-        slides: slidesToSave,
-        folderName: name,
-        id: storyboardId,
-        playbackTracks: tracksToSave
-      });
-    } catch (dbErr) {
-      console.error(dbErr);
+    if (db) {
+      try {
+        await setDoc(doc(db, 'storyboards', storyboardId), {
+          slides: slidesToSave,
+          folderName: name,
+          id: storyboardId,
+          playbackTracks: tracksToSave
+        });
+      } catch (dbErr) {
+        console.error(dbErr);
+      }
     }
   };
 
