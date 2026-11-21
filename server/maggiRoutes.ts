@@ -18,6 +18,7 @@ import express from 'express';
 
 type Router = express.Router;
 import { GoogleGenAI } from '@google/genai';
+import { generateContentWithFallback, normalizeModel } from './gemini';
 import {
   FREELLM_ENV,
   normaliseBaseUrl,
@@ -358,9 +359,9 @@ export const createMaggiRouter = (): Router => {
           parts: [{ text: m.content }],
         }));
 
-      const resolvedGeminiModel = (model && model.trim()) ? model.trim() : 'gemini-4-hydrogen';
+      const resolvedGeminiModel = normalizeModel((model && model.trim()) ? model.trim() : 'gemini-4-hydrogen');
       const isGemini4 = resolvedGeminiModel.toLowerCase().startsWith('gemini-4-');
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithFallback(ai, {
         model: resolvedGeminiModel,
         contents,
         config: {

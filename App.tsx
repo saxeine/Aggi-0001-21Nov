@@ -28,6 +28,7 @@ import { generateResponse, generateSpeech, searchWeb, chunkText, base64ToText, t
 import { generateUnifiedAIResponse } from './services/unifiedAi';
 import { buildToolPrompt } from './utils/toolPrompts';
 import { buildAudioPlayerHtml, buildAudioNoticeHtml, buildPodcastDocumentHtml, buildErrorHtml } from './utils/podcastHtml';
+import type { PodcastRole } from './utils/podcastGating';
 import { loadAudioBlobFromIDB } from './services/storage';
 import { saveGlobalHistorySafely } from './services/historyStorage';
 import { savePodcastToHistory } from './utils/podcastHistory';
@@ -118,6 +119,10 @@ const App: React.FC = () => {
       length: 'Short (1-2 min)',
       language: 'English'
   });
+
+  // Explicitly configured podcast speaker roles; starts empty so users must
+  // configure speaker(s) (or press Use Default) before generating a podcast.
+  const [touchedRoles, setTouchedRoles] = useState<PodcastRole[]>([]);
 
   const [selectedMIPrOMPT, setSelectedMIPrOMPT] = useState<{type: 'prB' | 'ctB' | 'txS', content: string} | null>(null);
 
@@ -499,6 +504,11 @@ const App: React.FC = () => {
   };
 
   const handleToolAction = async (toolId: string, payload?: any) => {
+     const isPodcastFormatTool = toolId === 'podcast_1' || toolId === 'podcast_2' || toolId === 'podcast_3';
+     if (isPodcastFormatTool && !touchedRoles.includes('host')) {
+       setActiveSideTab('audio');
+       return;
+     }
      if (!activeSession && (!payload || !payload.isIndependent)) return;
      setPreviewCode(null);
      setGeneratedAudio(null);
@@ -883,7 +893,12 @@ const App: React.FC = () => {
           if (newScript.includes('Expert:') || newScript.includes(`${voiceSettings.expertLabel}:`)) speakers = 2;
           if (newScript.includes('Guest:') || newScript.includes(`${voiceSettings.guestLabel}:`)) speakers = 3;
           
+          const providerLabel = settings.provider === 'maggi' ? 'FreeLLMAPI (MAGGI)'
+              : settings.provider === 'ollama' ? 'Ollama'
+              : settings.provider === 'custom' ? 'Custom AI'
+              : 'Gemini';
           let audioBase64: string | null = null;
+          let audioNote = '';
           if (settings.provider === 'gemini') {
               const speechText = newScript.substring(0, 4000);
               try {
@@ -891,9 +906,13 @@ const App: React.FC = () => {
               } catch (speechErr) {
                   console.warn('Audio regeneration failed:', speechErr);
               }
-              if (audioBase64) setGeneratedAudio(audioBase64);
+              if (audioBase64) {
+                  setGeneratedAudio(audioBase64);
+              } else {
+                  audioNote = 'Audio generation failed with the Gemini engine. Your transcript is ready below — you can retry audio from the player.';
+              }
           } else {
-              console.warn('Audio (TTS) is only available with the Gemini engine; the transcript was regenerated but no audio was produced.');
+              audioNote = `Audio (TTS) is not available with the ${providerLabel} brain — it produces text only. Your transcript is ready below; switch Settings → AI Engine to Gemini to generate audio.`;
           }
 
           // 2. Update Preview Code (HTML)
@@ -901,7 +920,7 @@ const App: React.FC = () => {
               script: newScript,
               voiceSettings,
               audioBase64,
-              audioNoticeHtml: '',
+              audioNoticeHtml: (!audioBase64 && audioNote) ? buildAudioNoticeHtml(audioNote) : '',
               audioPlayerHtml: buildAudioPlayerHtml(audioBase64),
           });
           setPreviewCode(code);
@@ -974,6 +993,8 @@ const App: React.FC = () => {
                   onDeleteCastMember={deleteCastMember}
                   isCastLibraryOpen={isCastLibraryOpen}
                   setIsCastLibraryOpen={setIsCastLibraryOpen}
+                  touchedRoles={touchedRoles}
+                  setTouchedRoles={setTouchedRoles}
                                                       miprompts={miprompts}
                   onAddMIPrOMPT={addMIPrOMPT}
                   onUpdateMIPrOMPT={updateMIPrOMPT}
@@ -1001,6 +1022,7 @@ const App: React.FC = () => {
                 initialTab={activeSettingsTab}
                 voiceSettings={voiceSettings}
                 onUpdateVoiceSettings={setVoiceSettings}
+                onTouchRole={(role) => setTouchedRoles(prev => (prev.includes(role) ? prev : [...prev, role]))}
                 castLibrary={castLibrary}
                 onAddCastMember={addCastMember}
                 onUpdateCastMember={updateCastMember}
@@ -1041,6 +1063,8 @@ const App: React.FC = () => {
                   onDeleteCastMember={deleteCastMember}
                   isCastLibraryOpen={isCastLibraryOpen}
                   setIsCastLibraryOpen={setIsCastLibraryOpen}
+                  touchedRoles={touchedRoles}
+                  setTouchedRoles={setTouchedRoles}
                   miprompts={miprompts}
                   onAddMIPrOMPT={addMIPrOMPT}
                   onUpdateMIPrOMPT={updateMIPrOMPT}
@@ -1068,6 +1092,7 @@ const App: React.FC = () => {
                 initialTab={activeSettingsTab}
                 voiceSettings={voiceSettings}
                 onUpdateVoiceSettings={setVoiceSettings}
+                onTouchRole={(role) => setTouchedRoles(prev => (prev.includes(role) ? prev : [...prev, role]))}
                 castLibrary={castLibrary}
                 onAddCastMember={addCastMember}
                 onUpdateCastMember={updateCastMember}
@@ -1194,6 +1219,7 @@ const App: React.FC = () => {
                 initialTab={activeSettingsTab}
                 voiceSettings={voiceSettings}
                 onUpdateVoiceSettings={setVoiceSettings}
+                onTouchRole={(role) => setTouchedRoles(prev => (prev.includes(role) ? prev : [...prev, role]))}
                 castLibrary={castLibrary}
                 onAddCastMember={addCastMember}
                 onUpdateCastMember={updateCastMember}
@@ -1336,6 +1362,8 @@ const App: React.FC = () => {
             toolLoadingState={toolLoadingState}
             voiceSettings={voiceSettings}
             onUpdateVoiceSettings={setVoiceSettings}
+            touchedRoles={touchedRoles}
+            setTouchedRoles={setTouchedRoles}
             onGoHome={() => setViewMode('library')}
             isSettingsOpen={isSettingsOpen}
             activeSettingsTab={activeSettingsTab}
@@ -1540,6 +1568,7 @@ const App: React.FC = () => {
         initialTab={activeSettingsTab}
         voiceSettings={voiceSettings}
         onUpdateVoiceSettings={setVoiceSettings}
+        onTouchRole={(role) => setTouchedRoles(prev => (prev.includes(role) ? prev : [...prev, role]))}
         castLibrary={castLibrary}
         onAddCastMember={addCastMember}
         onUpdateCastMember={updateCastMember}

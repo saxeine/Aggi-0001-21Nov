@@ -32,6 +32,7 @@ interface SettingsPanelProps {
   onDeleteCastMember?: (id: string) => void;
   onResetLibrary?: () => void;
   onOpenMaggi?: () => void;
+  onTouchRole?: (role: 'host' | 'expert' | 'guest') => void;
 }
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -49,7 +50,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onUpdateCastMember,
   onDeleteCastMember,
   onResetLibrary,
-  onOpenMaggi
+  onOpenMaggi,
+  onTouchRole
 }) => {
   const { language, setLanguage, t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'ai' | 'visual' | 'cast'>(initialTab);
@@ -372,6 +374,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           updates.guestAvatar = member.avatar;
       }
       onUpdateVoiceSettings({ ...voiceSettings, ...updates });
+      onTouchRole?.(role);
   };
 
   const handleSaveMember = () => {

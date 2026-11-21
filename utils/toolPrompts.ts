@@ -96,32 +96,35 @@ STYLE: Use a professional, modern layout. Header row should be distinct. Use zeb
       break;
     }
     case 'podcast_2': {
+      const targetLength = payload?.length || voiceSettings.length || 'Medium (3-5 min)';
       prompt = `Create a detailed script for a 2-person Podcast (${voiceSettings.hostLabel} and ${voiceSettings.expertLabel}) discussing these sources.
 
              HOST (${voiceSettings.hostLabel}): ${voiceSettings.hostBio || 'A charismatic and engaging host.'}
              EXPERT (${voiceSettings.expertLabel}): ${voiceSettings.expertBio || 'A knowledgeable subject matter expert.'}
 
-             Use a conversational, engaging tone. Target Length: ${voiceSettings.length || 'Medium (3-5 min)'}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:** and **${voiceSettings.expertLabel}:** to denote speakers.`;
+             Use a conversational, engaging tone. Target Length: ${targetLength}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:** and **${voiceSettings.expertLabel}:** to denote speakers.`;
       isPodcast = true;
       break;
     }
     case 'podcast_1': {
+      const targetLength = payload?.length || voiceSettings.length || 'Medium (3-5 min)';
       prompt = `Create a detailed script for a Single-Host Podcast reporting on these sources.
 
              HOST (${voiceSettings.hostLabel}): ${voiceSettings.hostBio || 'A charismatic and engaging host.'}
 
-             The host '${voiceSettings.hostLabel}' is reporting directly to the audience. Use an engaging, storytelling tone. Target Length: ${voiceSettings.length || 'Medium (3-5 min)'}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:** to denote the speaker.`;
+             The host '${voiceSettings.hostLabel}' is reporting directly to the audience. Use an engaging, storytelling tone. Target Length: ${targetLength}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:** to denote the speaker.`;
       isPodcast = true;
       break;
     }
     case 'podcast_3': {
+      const targetLength = payload?.length || voiceSettings.length || 'Medium (3-5 min)';
       prompt = `Create a detailed script for a 3-person Roundtable Podcast (${voiceSettings.hostLabel}, ${voiceSettings.expertLabel}, and ${voiceSettings.guestLabel}).
 
              HOST (${voiceSettings.hostLabel}): ${voiceSettings.hostBio || 'A charismatic and engaging host.'}
              EXPERT (${voiceSettings.expertLabel}): ${voiceSettings.expertBio || 'A knowledgeable subject matter expert.'}
              GUEST (${voiceSettings.guestLabel}): ${voiceSettings.guestBio || 'A special guest with a unique perspective.'}
 
-             It should be a lively, multi-perspective discussion. Target Length: ${voiceSettings.length || 'Medium (3-5 min)'}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:**, **${voiceSettings.expertLabel}:**, and **${voiceSettings.guestLabel}:** to denote speakers.`;
+             It should be a lively, multi-perspective discussion. Target Length: ${targetLength}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:**, **${voiceSettings.expertLabel}:**, and **${voiceSettings.guestLabel}:** to denote speakers.`;
       isPodcast = true;
       break;
     }
@@ -273,11 +276,12 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
   // If the user configured more than one speaker and pressed report, only the
   // speaker in position one (host) is used — regardless of the selected format.
   if (isPodcast && payload?.hostOnly) {
+    const targetLength = payload?.length || voiceSettings.length || 'Medium (3-5 min)';
     prompt = `Create a detailed script for a Single-Host Podcast reporting on these sources.
 
              HOST (${voiceSettings.hostLabel}): ${voiceSettings.hostBio || 'A charismatic and engaging host.'}
 
-             The host '${voiceSettings.hostLabel}' is reporting directly to the audience. Use an engaging, storytelling tone. Target Length: ${voiceSettings.length || 'Medium (3-5 min)'}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:** to denote the speaker.`;
+             The host '${voiceSettings.hostLabel}' is reporting directly to the audience. Use an engaging, storytelling tone. Target Length: ${targetLength}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:** to denote the speaker.`;
   }
 
   if (isPodcast) {

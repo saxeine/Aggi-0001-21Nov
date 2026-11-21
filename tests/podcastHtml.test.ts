@@ -75,4 +75,11 @@ describe('buildAudioPlayerHtml', () => {
   it('returns empty string without audio', () => {
     expect(buildAudioPlayerHtml(null)).toBe('');
   });
+
+  it('includes a volume slider and mute toggle when audio is present', () => {
+    const html = buildAudioPlayerHtml('AAAA');
+    expect(html).toContain('id="pp-volume"');
+    expect(html).toContain('aria-label="Volume"');
+    expect(html).toContain('id="pp-mute-btn"');
+  });
 });

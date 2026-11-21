@@ -308,7 +308,7 @@ Only output the raw JSON array of objects.`;
       }
     }
   } catch (error) {
-    console.error('Failed to generate fallback news with Gemini:', error);
+    console.warn('Gemini fallback news unavailable, using programmatic news:', error instanceof Error ? error.message : String(error));
   }
   return [];
 };

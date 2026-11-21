@@ -3,6 +3,7 @@ import React, { useRef, useState, useMemo } from 'react';
 import { MediaItem, Session, Theme, ThemeSettings, VoiceSettings, CharacterPrompt } from '../types';
 import CharacterLibraryModal from './CharacterLibraryModal';
 import { useLanguage } from '../contexts/LanguageContext';
+import { computePodcastGate, requiredRolesFor, PodcastRole, PodcastFormatId } from '../utils/podcastGating';
 
 interface MediaPanelProps {
   activeTab: 'sessions' | 'sources' | 'tools' | 'audio';
@@ -36,6 +37,8 @@ interface MediaPanelProps {
   onlySourcesView?: boolean;
   voiceSettings: VoiceSettings;
   onUpdateVoiceSettings: (v: VoiceSettings) => void;
+  touchedRoles?: PodcastRole[];
+  setTouchedRoles?: React.Dispatch<React.SetStateAction<PodcastRole[]>>;
   onGoHome: () => void;
   isSettingsOpen?: boolean;
   activeSettingsTab?: 'ai' | 'visual' | 'cast';
@@ -80,6 +83,8 @@ const MediaPanel: React.FC<MediaPanelProps> = ({
   onlySourcesView = false,
   voiceSettings,
   onUpdateVoiceSettings,
+  touchedRoles: propTouchedRoles,
+  setTouchedRoles: propSetTouchedRoles,
   onGoHome,
   isSettingsOpen,
   activeSettingsTab,
@@ -92,6 +97,14 @@ const MediaPanel: React.FC<MediaPanelProps> = ({
   onDeleteCharacter
 }) => {
   const { t } = useLanguage();
+  const [localTouchedRoles, setLocalTouchedRoles] = useState<PodcastRole[]>([]);
+  const effectiveTouchedRoles = propTouchedRoles ?? localTouchedRoles;
+  const setEffectiveTouchedRoles = propSetTouchedRoles ?? setLocalTouchedRoles;
+  const touchRole = (role: PodcastRole) => setEffectiveTouchedRoles(prev => (prev.includes(role) ? prev : [...prev, role]));
+  const untouchRole = (role: PodcastRole) => setEffectiveTouchedRoles(prev => prev.filter(r => r !== role));
+  const configuredRoles = (['host', 'expert', 'guest'] as const).filter(r => effectiveTouchedRoles.includes(r));
+  const hostConfigured = effectiveTouchedRoles.includes('host');
+  const multipleConfigured = configuredRoles.length > 1;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isLinkInputOpen, setIsLinkInputOpen] = useState(false);
   const [isTextInputOpen, setIsTextInputOpen] = useState(false);
@@ -808,126 +821,96 @@ const MediaPanel: React.FC<MediaPanelProps> = ({
               
               {activeTab === 'audio' && (
                 <>
-                  <div className="bg-app-card border border-app-border rounded-xl p-3">
-                      <div className="flex items-center gap-3 mb-3">
-                          <div className="p-2.5 rounded-lg bg-app-panel border border-app-border text-rose-500">
-                              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                          </div>
-                          <div className="flex-1">
-                              <h4 className="text-sm font-bold text-app-text">Audio Podcast</h4>
-                              <div className="flex items-center gap-1.5 mt-1">
-                                  <button 
-                                      onClick={() => onUpdateVoiceSettings({ ...voiceSettings, language: 'English' })}
-                                      className={`text-[9px] px-2 py-0.5 rounded-md border font-bold transition-all ${voiceSettings.language === 'English' || !voiceSettings.language ? 'bg-blue-600 border-blue-500 text-white shadow-sm' : 'bg-app-panel border-app-border text-app-dim hover:text-app-text'}`}
-                                  >
-                                      EN
-                                  </button>
-                                  <button 
-                                      onClick={() => onUpdateVoiceSettings({ ...voiceSettings, language: 'Swedish' })}
-                                      className={`text-[9px] px-2 py-0.5 rounded-md border font-bold transition-all ${voiceSettings.language === 'Swedish' ? 'bg-blue-600 border-blue-500 text-white shadow-sm' : 'bg-app-panel border-app-border text-app-dim hover:text-app-text'}`}
-                                  >
-                                      SV
-                                  </button>
-                              </div>
-                          </div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                          <button 
-                              onClick={() => onRunTool('podcast_1')} 
-                              disabled={toolLoadingState['podcast_1']}
-                              className="flex flex-col items-center justify-center p-2 bg-app-panel border border-app-border rounded-lg transition-all group/btn relative min-h-[60px] hover:border-purple-500 hover:bg-purple-500/10"
-                          >
-                              {toolLoadingState['podcast_1'] ? (
-                                 <div className="animate-spin h-4 w-4 border-2 border-purple-500 border-t-transparent rounded-full mb-1"></div>
-                              ) : (
-                                 <div className="mb-1">
-                                    <svg className="w-5 h-5 text-purple-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                                    </svg>
-                                 </div>
-                              )}
-                              <span className="text-[9px] opacity-70">Report</span>
-                          </button>
-                          <button 
-                              onClick={() => onRunTool('podcast_2')} 
-                              disabled={toolLoadingState['podcast_2']}
-                              className="flex flex-col items-center justify-center p-2 bg-app-panel border border-app-border rounded-lg transition-all group/btn relative min-h-[60px] hover:border-blue-500 hover:bg-blue-500/10"
-                          >
-                              {toolLoadingState['podcast_2'] ? (
-                                 <div className="animate-spin h-4 w-4 border-2 border-purple-500 border-t-transparent rounded-full mb-1"></div>
-                              ) : (
-                                 <div className="mb-1">
-                                    <svg className="w-5 h-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
-                                    </svg>
-                                 </div>
-                              )}
-                              <span className="text-[9px] opacity-70">Dialogue</span>
-                          </button>
-                          <button 
-                              onClick={() => onRunTool('podcast_3')} 
-                              disabled={toolLoadingState['podcast_3']}
-                              className="flex flex-col items-center justify-center p-2 bg-app-panel border border-app-border rounded-lg transition-all group/btn relative min-h-[60px] hover:border-amber-500 hover:bg-amber-500/10"
-                          >
-                              {toolLoadingState['podcast_3'] ? (
-                                 <div className="animate-spin h-4 w-4 border-2 border-purple-500 border-t-transparent rounded-full mb-1"></div>
-                              ) : (
-                                 <div className="mb-1">
-                                    <svg className="w-5 h-5 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z" />
-                                    </svg>
-                                 </div>
-                              )}
-                              <span className="text-[9px] opacity-70">Roundtable</span>
-                          </button>
-                      </div>
-                  </div>
-
+                  {/* Step 1 — Speaker Configuration MUST come before creating a podcast */}
                   <div className="bg-app-card border border-app-border rounded-xl p-3 mb-2">
-                      <div className="flex items-center gap-2 mb-3">
-                          <svg className="w-4 h-4 text-app-text" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                          <h4 className="text-xs font-bold text-app-text uppercase tracking-wider">Podcast Length</h4>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                          {['Short (1-2 min)', 'Medium (3-5 min)', 'Long (Deep Dive)'].map((len) => (
-                              <button
-                                  key={len}
-                                  onClick={() => onUpdateVoiceSettings({ ...voiceSettings, length: len as any })}
-                                  className={`p-2 rounded-lg border text-[10px] font-bold transition-all ${voiceSettings.length === len ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-panel border-app-border text-app-dim hover:text-app-text'}`}
-                              >
-                                  {len.split(' ')[0]}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  <div className="bg-app-card border border-app-border rounded-xl p-3 mb-2">
-                      <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
                           <div className="flex items-center gap-2">
-                              <svg className="w-4 h-4 text-app-text" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                              <h4 className="text-xs font-bold text-app-text uppercase tracking-wider">Voice Settings</h4>
+                              <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                              <h4 className="text-xs font-bold text-app-text uppercase tracking-wider">
+                                <span className="text-emerald-400">Step 1</span> — Speakers
+                              </h4>
                           </div>
-                          <button 
-                            onClick={() => setIsCharacterModalOpen(true)}
-                            className="text-[10px] font-bold text-rose-500 hover:text-rose-400 uppercase tracking-widest flex items-center gap-1 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20 transition-all"
-                          >
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" /></svg>
-                            Library
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const isSv = voiceSettings.language === 'Swedish';
+                                onUpdateVoiceSettings({
+                                  ...voiceSettings,
+                                  host: isSv ? 'Fenrir' : 'Kore',
+                                  hostLabel: isSv ? 'Lars' : 'Narrator Bot',
+                                  hostMemberId: isSv ? 'sys-host-sv-1' : 'sys-host-1',
+                                  expertMemberId: undefined,
+                                  guestMemberId: undefined,
+                                });
+                                setEffectiveTouchedRoles(['host']);
+                              }}
+                              className="text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/30 transition-all"
+                              title="Configure default Host speaker only"
+                            >
+                              {t('studio.useDefault')}
+                            </button>
+                            <button 
+                              onClick={() => setIsCharacterModalOpen(true)}
+                              className="text-[10px] font-bold text-rose-500 hover:text-rose-400 uppercase tracking-widest flex items-center gap-1 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20 transition-all"
+                            >
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" /></svg>
+                              Library
+                            </button>
+                          </div>
                       </div>
-                      <div className="space-y-4">
-                        {[
-                          { key: 'host', label: 'hostLabel', default: 'Sax' },
-                          { key: 'expert', label: 'expertLabel', default: 'Chameleon' },
-                          { key: 'guest', label: 'guestLabel', default: 'The Pinpoint' }
-                        ].map((role) => (
+                      <div className="space-y-3">
+                        {([
+                          { key: 'host' as const, labelKey: 'hostLabel' as const, memberKey: 'hostMemberId' as const, title: 'Host', optional: false },
+                          { key: 'expert' as const, labelKey: 'expertLabel' as const, memberKey: 'expertMemberId' as const, title: 'Expert', optional: true },
+                          { key: 'guest' as const, labelKey: 'guestLabel' as const, memberKey: 'guestMemberId' as const, title: 'Guest', optional: true }
+                        ]).map((role) => {
+                            const isRoleConfigured = effectiveTouchedRoles.includes(role.key);
+                            const currentVoiceValue = isRoleConfigured
+                              ? (voiceSettings.language === 'Swedish'
+                                  ? (availableVoices.find(v => v.lang === 'Swedish' && v.voice === voiceSettings[role.key])?.name || voiceSettings[role.key] || '')
+                                  : (voiceSettings[role.key] || ''))
+                              : '';
+                            const currentDisplayLabel = isRoleConfigured ? (voiceSettings[role.labelKey] || '') : '';
+                            return (
                             <div key={role.key} className="p-2.5 bg-app-panel rounded-lg border border-app-border space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="text-[10px] font-bold uppercase text-app-text">{role.title}</span>
+                                        {role.optional && (
+                                          <span className="text-[8px] text-zinc-500 uppercase">{t('studio.optional')}</span>
+                                        )}
+                                        <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold uppercase ${isRoleConfigured ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-zinc-800 text-zinc-500 border border-zinc-700'}`}>
+                                          {isRoleConfigured ? t('studio.configured') : t('studio.notConfigured')}
+                                        </span>
+                                    </div>
+                                    {isRoleConfigured && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          untouchRole(role.key);
+                                          onUpdateVoiceSettings({ ...voiceSettings, [role.memberKey]: undefined });
+                                        }}
+                                        className="text-[9px] text-zinc-500 hover:text-red-400 transition-colors font-semibold uppercase"
+                                      >
+                                        × {t('studio.clear')}
+                                      </button>
+                                    )}
+                                </div>
                                 <div className="flex items-center gap-2">
                                     <input 
                                         type="text"
-                                        value={voiceSettings[role.label as keyof VoiceSettings]}
-                                        onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, [role.label]: e.target.value })}
-                                        placeholder={`Name for ${role.key}...`}
+                                        value={currentDisplayLabel}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          if (val.trim()) {
+                                            touchRole(role.key);
+                                            onUpdateVoiceSettings({ ...voiceSettings, [role.labelKey]: val });
+                                          } else {
+                                            onUpdateVoiceSettings({ ...voiceSettings, [role.labelKey]: val });
+                                          }
+                                        }}
+                                        placeholder={`Enter ${role.title} name...`}
                                         className="flex-1 bg-app-input border border-app-border text-[10px] font-bold uppercase text-app-text rounded px-2 py-1 focus:outline-none focus:border-app-text"
                                     />
                                 </div>
@@ -949,28 +932,31 @@ const MediaPanel: React.FC<MediaPanelProps> = ({
                                     </div>
                                 </div>
                                 <select 
-                                    value={
-                                        voiceSettings.language === 'Swedish' 
-                                            ? (availableVoices.find(v => v.lang === 'Swedish' && v.voice === voiceSettings[role.key as keyof VoiceSettings])?.name || voiceSettings[role.key as keyof VoiceSettings] || '')
-                                            : (voiceSettings[role.key as keyof VoiceSettings] || '')
-                                    }
+                                    value={currentVoiceValue}
                                     onChange={(e) => {
+                                        if (!e.target.value) {
+                                          untouchRole(role.key);
+                                          onUpdateVoiceSettings({ ...voiceSettings, [role.memberKey]: undefined });
+                                          return;
+                                        }
+                                        touchRole(role.key);
                                         const isSwedish = voiceSettings.language === 'Swedish';
                                         const options = availableVoices.filter(v => isSwedish ? v.lang === 'Swedish' : v.lang === 'English');
                                         const selectedVoice = options.find(v => v.name === e.target.value);
                                         const updates: any = { [role.key]: selectedVoice ? (selectedVoice.voice || selectedVoice.name) : e.target.value };
                                         
                                         const standardNames = ['Sax', 'Chameleon', 'The Pinpoint', 'Lars', 'Elena', 'Astrid', 'Oskar', 'Freja', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede', 'Narrator Bot', 'Dr. Insight', 'Curious Listener'];
-                                        const currentLabel = voiceSettings[role.label as keyof VoiceSettings] || '';
-                                        const isCustom = currentLabel && !standardNames.includes(currentLabel);
+                                        const existingLabel = isRoleConfigured ? (voiceSettings[role.labelKey] || '') : '';
+                                        const isCustom = existingLabel && !standardNames.includes(existingLabel);
                                         
                                         if (selectedVoice && !isCustom) {
-                                            updates[role.label as keyof VoiceSettings] = selectedVoice.name;
+                                            updates[role.labelKey] = selectedVoice.name;
                                         }
                                         onUpdateVoiceSettings({ ...voiceSettings, ...updates });
                                     }}
                                     className="w-full bg-app-input border border-app-border text-xs text-app-text rounded px-2 py-1 focus:outline-none"
                                 >
+                                    <option value="">{t('studio.selectCastMember')}</option>
                                     {availableVoices.filter(v => {
                                         const langMatch = (!voiceSettings.language || voiceSettings.language === 'English') ? v.lang === 'English' : v.lang === 'Swedish';
                                         if (!langMatch) return false;
@@ -989,8 +975,11 @@ const MediaPanel: React.FC<MediaPanelProps> = ({
                                 <div className="space-y-1">
                                     <label className="text-[9px] text-app-dim uppercase font-bold">Character Profile</label>
                                     <select 
-                                        value={voiceSettings[`${role.key}CharacterId` as keyof VoiceSettings] || ''}
-                                        onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, [`${role.key}CharacterId`]: e.target.value })}
+                                        value={isRoleConfigured ? (voiceSettings[`${role.key}CharacterId` as keyof VoiceSettings] || '') : ''}
+                                        onChange={(e) => {
+                                          if (e.target.value) touchRole(role.key);
+                                          onUpdateVoiceSettings({ ...voiceSettings, [`${role.key}CharacterId`]: e.target.value });
+                                        }}
                                         className="w-full bg-app-input border border-app-border text-[10px] text-app-text rounded px-2 py-1 focus:outline-none"
                                     >
                                         <option value="">Default Personality</option>
@@ -998,15 +987,122 @@ const MediaPanel: React.FC<MediaPanelProps> = ({
                                             <option key={char.id} value={char.id}>{char.title}</option>
                                         ))}
                                     </select>
-                                    {voiceSettings[`${role.key}CharacterId` as keyof VoiceSettings] && (
+                                    {isRoleConfigured && voiceSettings[`${role.key}CharacterId` as keyof VoiceSettings] && (
                                         <div className="text-[9px] text-app-dim italic line-clamp-2 px-1">
                                             {characters.find(c => c.id === voiceSettings[`${role.key}CharacterId` as keyof VoiceSettings])?.content}
                                         </div>
                                     )}
                                 </div>
                             </div>
-                        ))}
+                        );
+                        })}
                      </div>
+                  </div>
+
+                  <div className="bg-app-card border border-app-border rounded-xl p-3 mb-2">
+                      <div className="flex items-center gap-2 mb-3">
+                          <svg className="w-4 h-4 text-app-text" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          <h4 className="text-xs font-bold text-app-text uppercase tracking-wider">Podcast Length</h4>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                          {['Short (1-2 min)', 'Medium (3-5 min)', 'Long (Deep Dive)'].map((len) => (
+                              <button
+                                  key={len}
+                                  onClick={() => onUpdateVoiceSettings({ ...voiceSettings, length: len as any })}
+                                  className={`p-2 rounded-lg border text-[10px] font-bold transition-all ${voiceSettings.length === len ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-panel border-app-border text-app-dim hover:text-app-text'}`}
+                              >
+                                  {len.split(' ')[0]}
+                              </button>
+                          ))}
+                      </div>
+                  </div>
+
+                  {/* Step 2 — Generate Podcast (locked until at least Host speaker is configured) */}
+                  <div className={`bg-app-card border border-app-border rounded-xl p-3 mb-2 transition-opacity ${hostConfigured ? '' : 'opacity-80'}`}>
+                      <div className="flex items-center gap-3 mb-3">
+                          <div className="p-2.5 rounded-lg bg-app-panel border border-app-border text-rose-500">
+                              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                          </div>
+                          <div className="flex-1">
+                              <h4 className="text-sm font-bold text-app-text">
+                                <span className="text-emerald-400 text-[10px] uppercase mr-1">Step 2</span>
+                                Audio Podcast
+                              </h4>
+                              <div className="flex items-center gap-1.5 mt-1">
+                                  <button 
+                                      onClick={() => onUpdateVoiceSettings({ ...voiceSettings, language: 'English' })}
+                                      className={`text-[9px] px-2 py-0.5 rounded-md border font-bold transition-all ${voiceSettings.language === 'English' || !voiceSettings.language ? 'bg-blue-600 border-blue-500 text-white shadow-sm' : 'bg-app-panel border-app-border text-app-dim hover:text-app-text'}`}
+                                  >
+                                      EN
+                                  </button>
+                                  <button 
+                                      onClick={() => onUpdateVoiceSettings({ ...voiceSettings, language: 'Swedish' })}
+                                      className={`text-[9px] px-2 py-0.5 rounded-md border font-bold transition-all ${voiceSettings.language === 'Swedish' ? 'bg-blue-600 border-blue-500 text-white shadow-sm' : 'bg-app-panel border-app-border text-app-dim hover:text-app-text'}`}
+                                  >
+                                      SV
+                                  </button>
+                              </div>
+                          </div>
+                      </div>
+                      {!hostConfigured && (
+                        <div className="mb-3 flex items-center gap-2 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2">
+                          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                          <span>{t('studio.configureSpeakersHint')}</span>
+                        </div>
+                      )}
+                      {hostConfigured && multipleConfigured && (
+                        <div className="mb-3 text-[10px] text-teal-400 bg-teal-500/10 border border-teal-500/30 rounded-lg px-2.5 py-1.5">
+                          {t('studio.soloUsesHostOnly')}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-3 gap-2">
+                          {([
+                            { id: 'podcast_1' as PodcastFormatId, label: 'Report', hoverClass: 'hover:border-purple-500 hover:bg-purple-500/10', iconColor: 'text-purple-400', path: 'M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z', singlePath: true },
+                            { id: 'podcast_2' as PodcastFormatId, label: 'Dialogue', hoverClass: 'hover:border-blue-500 hover:bg-blue-500/10', iconColor: 'text-blue-400', path: 'M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z', singlePath: false },
+                            { id: 'podcast_3' as PodcastFormatId, label: 'Roundtable', hoverClass: 'hover:border-amber-500 hover:bg-amber-500/10', iconColor: 'text-amber-400', path: 'M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z', singlePath: false },
+                          ]).map((fmt) => {
+                            const fmtGate = computePodcastGate({
+                              touchedRoles: effectiveTouchedRoles,
+                              activeFormat: fmt.id,
+                              contentReady: true,
+                              isLoading: false,
+                            });
+                            const missing = requiredRolesFor(fmt.id).filter(r => !configuredRoles.includes(r));
+                            return (
+                              <button 
+                                key={fmt.id}
+                                onClick={() => {
+                                  if (!fmtGate.hostConfigured) return;
+                                  onRunTool(fmt.id, { hostOnly: fmtGate.hostOnly, speakerCount: fmtGate.speakerCount });
+                                }}
+                                disabled={!hostConfigured || toolLoadingState[fmt.id]}
+                                className={`flex flex-col items-center justify-center p-2 bg-app-panel border border-app-border rounded-lg transition-all group/btn relative min-h-[60px] disabled:opacity-40 disabled:cursor-not-allowed ${hostConfigured ? fmt.hoverClass : ''}`}
+                              >
+                                {toolLoadingState[fmt.id] ? (
+                                   <div className="animate-spin h-4 w-4 border-2 border-purple-500 border-t-transparent rounded-full mb-1"></div>
+                                ) : (
+                                   <div className="mb-1">
+                                      <svg className={`w-5 h-5 ${fmt.iconColor}`} viewBox="0 0 20 20" fill="currentColor">
+                                          {fmt.singlePath ? (
+                                            <path fillRule="evenodd" d={fmt.path} clipRule="evenodd" />
+                                          ) : (
+                                            <path d={fmt.path} />
+                                          )}
+                                      </svg>
+                                   </div>
+                                )}
+                                <span className="text-[9px] opacity-80">{fmt.label}</span>
+                                {hostConfigured && missing.length > 0 && (
+                                  <span className="text-[8px] text-amber-400/90 mt-0.5 text-center leading-tight">
+                                    {t('studio.needs')} {missing.map(r => r[0].toUpperCase() + r.slice(1)).join('+')}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                      </div>
                   </div>
 
                   {/* Generated History Section */}

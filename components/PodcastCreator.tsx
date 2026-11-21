@@ -22,15 +22,14 @@ interface PodcastCreatorProps {
   /** Roles the user explicitly configured (host/expert/guest) — owned by the parent so the player header honors the same rule. */
   touchedRoles: Role[];
   setTouchedRoles: React.Dispatch<React.SetStateAction<Role[]>>;
+  /** Optional controlled topic/content input (lifted so PromptLibraryModal & quick-regenerate share it). */
+  customInput?: string;
+  onChangeCustomInput?: (value: string) => void;
+  includeSessionData?: boolean;
+  onChangeIncludeSessionData?: (value: boolean) => void;
 }
 
 const STANDARD_NAMES = ['Sax', 'Chameleon', 'The Pinpoint', 'Lars', 'Elena', 'Astrid', 'Oskar', 'Freja', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede', 'Narrator Bot', 'Dr. Insight', 'Curious Listener'];
-
-const FORMAT_OPTIONS: Array<{ id: FormatId; title: string; subtitle: string; accent: string }> = [
-  { id: 'podcast_1', title: 'Solo', subtitle: 'Single host monologue', accent: 'emerald' },
-  { id: 'podcast_2', title: 'Duo', subtitle: 'Host & Expert dialogue', accent: 'blue' },
-  { id: 'podcast_3', title: 'Roundtable', subtitle: '3-person discussion', accent: 'purple' },
-];
 
 const castMemberMatchesLanguage = (m: CastMember, role: Role, language: string | undefined): boolean => {
   if (language === 'Swedish') {
@@ -59,6 +58,7 @@ const defaultCastMemberFor = (role: Role, castLibrary: CastMember[], language: s
 const roleLabelKey = (role: Role) => (`${role}Label`) as 'hostLabel' | 'expertLabel' | 'guestLabel';
 const roleBioKey = (role: Role) => (`${role}Bio`) as 'hostBio' | 'expertBio' | 'guestBio';
 const roleAvatarKey = (role: Role) => (`${role}Avatar`) as 'hostAvatar' | 'expertAvatar' | 'guestAvatar';
+const roleMemberIdKey = (role: Role) => (`${role}MemberId`) as 'hostMemberId' | 'expertMemberId' | 'guestMemberId';
 
 const PodcastCreator: React.FC<PodcastCreatorProps> = ({
   voiceSettings,
@@ -74,11 +74,21 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
   onOpenPrompts,
   touchedRoles,
   setTouchedRoles,
+  customInput,
+  onChangeCustomInput,
+  includeSessionData,
+  onChangeIncludeSessionData,
 }) => {
   const { t } = useLanguage();
 
-  const [podcastCustomInput, setPodcastCustomInput] = useState('');
-  const [podcastIncludeSessionData, setPodcastIncludeSessionData] = useState(hasActiveSession);
+  const [localCustomInput, setLocalCustomInput] = useState('');
+  const [localIncludeSessionData, setLocalIncludeSessionData] = useState(hasActiveSession);
+
+  const podcastCustomInput = customInput !== undefined ? customInput : localCustomInput;
+  const setPodcastCustomInput = onChangeCustomInput || setLocalCustomInput;
+  const podcastIncludeSessionData = includeSessionData !== undefined ? includeSessionData : localIncludeSessionData;
+  const setPodcastIncludeSessionData = onChangeIncludeSessionData || setLocalIncludeSessionData;
+
   const [selectedHostCastMemberId, setSelectedHostCastMemberId] = useState<string | null>(null);
   const [selectedExpertCastMemberId, setSelectedExpertCastMemberId] = useState<string | null>(null);
   const [selectedGuestCastMemberId, setSelectedGuestCastMemberId] = useState<string | null>(null);
@@ -87,7 +97,14 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
   const [guestGenderFilter, setGuestGenderFilter] = useState<GenderFilter>('All');
   const [showBios, setShowBios] = useState(false);
 
+  const FORMAT_OPTIONS: Array<{ id: FormatId; title: string; subtitle: string; accent: string }> = [
+    { id: 'podcast_1', title: t('studio.solo'), subtitle: t('studio.soloSubtitle'), accent: 'emerald' },
+    { id: 'podcast_2', title: t('studio.duo'), subtitle: t('studio.duoSubtitle'), accent: 'blue' },
+    { id: 'podcast_3', title: t('studio.roundtable'), subtitle: t('studio.roundtableSubtitle'), accent: 'purple' },
+  ];
+
   const touchRole = (role: Role) => setTouchedRoles(prev => (prev.includes(role) ? prev : [...prev, role]));
+  const untouchRole = (role: Role) => setTouchedRoles(prev => prev.filter(r => r !== role));
 
   useEffect(() => {
     setPodcastIncludeSessionData(hasActiveSession);
@@ -103,13 +120,24 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
       guest: voiceSettings.guest,
     };
     (['host', 'expert', 'guest'] as Role[]).forEach(role => {
-      if (!touchedRoles.includes(role)) return;
+      const setter = role === 'host' ? setSelectedHostCastMemberId : role === 'expert' ? setSelectedExpertCastMemberId : setSelectedGuestCastMemberId;
+      if (!touchedRoles.includes(role)) {
+        setter(null);
+        return;
+      }
+      const explicitMemberId = voiceSettings[roleMemberIdKey(role)];
+      if (explicitMemberId) {
+        const explicitMember = castLibrary.find(m => m.id === explicitMemberId);
+        if (explicitMember && castMemberMatchesLanguage(explicitMember, role, voiceSettings.language)) {
+          setter(explicitMember.id);
+          return;
+        }
+      }
       const voice = roleVoice[role];
       if (!voice) return;
-      const setter = role === 'host' ? setSelectedHostCastMemberId : role === 'expert' ? setSelectedExpertCastMemberId : setSelectedGuestCastMemberId;
       const currentId = role === 'host' ? selectedHostCastMemberId : role === 'expert' ? selectedExpertCastMemberId : selectedGuestCastMemberId;
       const currentCM = currentId ? castLibrary.find(m => m.id === currentId) : null;
-      if (currentId && currentCM?.voice === voice) return;
+      if (currentId && currentCM?.voice === voice && castMemberMatchesLanguage(currentCM, role, voiceSettings.language)) return;
       const match = castLibrary.find(m => {
         if (role === 'host') {
           return isSwedish ? (m.voice === voice && (m.id.includes('-sv-') || m.name.includes('Lars') || m.name.includes('Elena'))) : (m.voice === voice && !m.id.includes('-sv-'));
@@ -123,6 +151,28 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
     });
   }, [voiceSettings, castLibrary, touchedRoles, selectedHostCastMemberId, selectedExpertCastMemberId, selectedGuestCastMemberId]);
 
+  const handleLanguageChange = (lang: 'English' | 'Swedish') => {
+    const nextSettings: VoiceSettings = { ...voiceSettings, language: lang };
+    // If host (or other configured role) was using a system default cast member,
+    // remap it smoothly to the new language's system default cast.
+    (['host', 'expert', 'guest'] as Role[]).forEach(role => {
+      if (!touchedRoles.includes(role)) return;
+      const currentMemberId = voiceSettings[roleMemberIdKey(role)];
+      const currentMember = currentMemberId ? castLibrary.find(m => m.id === currentMemberId) : null;
+      if (currentMember && !castMemberMatchesLanguage(currentMember, role, lang) && currentMember.id.startsWith('sys-')) {
+        const mapped = defaultCastMemberFor(role, castLibrary, lang);
+        if (mapped) {
+          nextSettings[role] = mapped.voice;
+          nextSettings[roleLabelKey(role)] = mapped.name;
+          nextSettings[roleAvatarKey(role)] = mapped.avatar;
+          nextSettings[roleBioKey(role)] = mapped.bio;
+          nextSettings[roleMemberIdKey(role)] = mapped.id;
+        }
+      }
+    });
+    onUpdateVoiceSettings(nextSettings);
+  };
+
   const handleAvatarUpload = (role: Role, file: File) => {
     touchRole(role);
     const reader = new FileReader();
@@ -133,18 +183,34 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const handleClearRole = (role: Role) => {
+    untouchRole(role);
+    const setSelected = role === 'host' ? setSelectedHostCastMemberId : role === 'expert' ? setSelectedExpertCastMemberId : setSelectedGuestCastMemberId;
+    setSelected(null);
+    onUpdateVoiceSettings({
+      ...voiceSettings,
+      [roleMemberIdKey(role)]: undefined,
+    });
+  };
+
   const handleCastMemberSelect = (role: Role, selectedId: string) => {
+    if (!selectedId) {
+      handleClearRole(role);
+      return;
+    }
     touchRole(role);
     const setSelected = role === 'host' ? setSelectedHostCastMemberId : role === 'expert' ? setSelectedExpertCastMemberId : setSelectedGuestCastMemberId;
     setSelected(selectedId);
     const selectedMember = castLibrary.find(m => m.id === selectedId);
     if (!selectedMember) return;
-    const currentLabel = voiceSettings[roleLabelKey(role)] || '';
+    const isCurrentlyConfigured = touchedRoles.includes(role);
+    const currentLabel = isCurrentlyConfigured ? (voiceSettings[roleLabelKey(role)] || '') : '';
     const isCustom = currentLabel && !STANDARD_NAMES.includes(currentLabel);
     const updates: any = {
       [role]: selectedMember.voice,
       [roleAvatarKey(role)]: selectedMember.avatar,
       [roleBioKey(role)]: selectedMember.bio,
+      [roleMemberIdKey(role)]: selectedMember.id,
     };
     if (!isCustom) updates[roleLabelKey(role)] = selectedMember.name;
     onUpdateVoiceSettings({ ...voiceSettings, ...updates });
@@ -164,6 +230,8 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
       hostAvatar: host.avatar,
       hostBio: host.bio,
       hostMemberId: host.id,
+      expertMemberId: undefined,
+      guestMemberId: undefined,
     });
     setSelectedHostCastMemberId(host.id);
     setSelectedExpertCastMemberId(null);
@@ -195,7 +263,7 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
     });
   };
 
-  const renderGenderFilter = (role: Role, filter: GenderFilter, setter: (g: GenderFilter) => void) => (
+  const renderGenderFilter = (filter: GenderFilter, setter: (g: GenderFilter) => void) => (
     <div className="flex gap-1 bg-zinc-950 px-1 py-0.5 rounded border border-zinc-800">
       {(['All', 'Female', 'Male'] as const).map(g => (
         <button
@@ -225,9 +293,11 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
       if (genderFilter !== 'All') return (m.gender || 'Female') === genderFilter;
       return true;
     });
-    const displayName = voiceSettings[labelKey] || '';
-    const bio = voiceSettings[bioKey] || '';
-    const avatar = voiceSettings[avatarKey];
+    // Only display configured cast values when the role is actually configured;
+    // unconfigured cards stay blank so "Not configured" is honest and accurate.
+    const displayName = isConfigured ? (voiceSettings[labelKey] || '') : '';
+    const bio = isConfigured ? (voiceSettings[bioKey] || '') : '';
+    const avatar = isConfigured ? voiceSettings[avatarKey] : undefined;
     const bgClass = accent === 'host' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : accent === 'expert' ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30';
     const borderFocus = accent === 'host' ? 'focus:border-purple-500' : accent === 'expert' ? 'focus:border-cyan-500' : 'focus:border-amber-500';
     const avatarAlt = role === 'host' ? 'Host' : role === 'expert' ? 'Expert' : 'Guest';
@@ -256,8 +326,8 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
           <div className="flex items-center gap-2">
             <div className="flex-1 min-w-0 space-y-2">
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="text-[10px] font-bold text-app-dim uppercase flex items-center gap-2">
+                <div className="flex items-center justify-between mb-1 gap-2">
+                  <div className="text-[10px] font-bold text-app-dim uppercase flex items-center gap-2 flex-wrap">
                     {title}
                     {(role === 'expert' || role === 'guest') && (
                       <span className="ml-1 text-[8px] text-zinc-500 font-normal uppercase">{t('studio.optional')}</span>
@@ -265,15 +335,25 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
                     <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${isConfigured ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-zinc-800 text-zinc-500 border border-zinc-700'}`}>
                       {isConfigured ? t('studio.configured') : t('studio.notConfigured')}
                     </span>
+                    {isConfigured && (
+                      <button
+                        type="button"
+                        onClick={() => handleClearRole(role)}
+                        className="text-[9px] text-zinc-500 hover:text-red-400 transition-colors font-semibold uppercase"
+                        title={t('studio.clear')}
+                      >
+                        × {t('studio.clear')}
+                      </button>
+                    )}
                   </div>
-                  {renderGenderFilter(role, genderFilter, setGenderFilter)}
+                  {renderGenderFilter(genderFilter, setGenderFilter)}
                 </div>
                 <select
-                  value={selectedId || ''}
+                  value={isConfigured ? (selectedId || '') : ''}
                   onChange={(e) => handleCastMemberSelect(role, e.target.value)}
                   className="bg-app-bg border border-app-border text-sm text-app-text rounded px-2 py-1 focus:outline-none w-full"
                 >
-                  <option value="">Select Cast Member...</option>
+                  <option value="">{t('studio.selectCastMember')}</option>
                   {options.map(member => (
                     <option key={member.id} value={member.id}>
                       {member.gender === 'Male' ? '♂' : '♀'} {member.name} ({member.voice} - {member.gender || 'Female'})
@@ -281,13 +361,24 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
                   ))}
                 </select>
                 <div className="mt-2">
-                  <div className="text-[10px] font-bold text-app-dim uppercase">Display Name</div>
+                  <div className="text-[10px] font-bold text-app-dim uppercase">{t('studio.displayName')}</div>
                   <input
                     type="text"
                     value={displayName}
                     onChange={(e) => {
-                      touchRole(role);
-                      onUpdateVoiceSettings({ ...voiceSettings, [labelKey]: e.target.value });
+                      const val = e.target.value;
+                      if (!isConfigured && val.trim()) {
+                        const fallbackMember = defaultCastMemberFor(role, castLibrary, voiceSettings.language);
+                        touchRole(role);
+                        onUpdateVoiceSettings({
+                          ...voiceSettings,
+                          [role]: voiceSettings[role] || fallbackMember?.voice || 'Kore',
+                          [labelKey]: val,
+                        });
+                      } else {
+                        touchRole(role);
+                        onUpdateVoiceSettings({ ...voiceSettings, [labelKey]: val });
+                      }
                     }}
                     placeholder="Rename Character..."
                     className={`bg-app-bg border border-app-border text-xs text-app-text rounded px-3 py-1.5 focus:outline-none w-full ${borderFocus} transition-colors`}
@@ -298,7 +389,7 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
           </div>
           {showBios && (
             <div className="animate-fade-in">
-              <div className="text-[10px] font-bold text-app-dim uppercase mb-1">Bio / Vibe</div>
+              <div className="text-[10px] font-bold text-app-dim uppercase mb-1">{t('studio.bioVibe')}</div>
               <textarea
                 value={bio}
                 onChange={(e) => {
@@ -325,7 +416,7 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
               </svg>
             </span>
-            Podcast Creator
+            {t('studio.podcastCreator')}
           </h2>
           <button
             onClick={onOpenHistory}
@@ -334,7 +425,7 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            History
+            {t('studio.history')}
           </button>
           <button
             onClick={onOpenPrompts}
@@ -343,7 +434,7 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            Prompts
+            {t('studio.prompts')}
           </button>
           <button
             onClick={() => setIsCastLibraryOpen(true)}
@@ -352,19 +443,19 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.149-1.268.432-1.828M14 10a6 6 0 01-6 6H6a6 6 0 01-6-6V7a3 3 0 013-3h7a3 3 0 013 3v3zm-4 0a4 4 0 100-8 4 4 0 000 8z" />
             </svg>
-            Cast
+            {t('studio.cast')}
           </button>
         </div>
         <p className="text-app-dim mb-6">
-          Configure your AI podcast hosts and generate a conversation based on your selected session content.
+          {t('studio.podcastCreatorDesc')}
         </p>
 
         <div className="space-y-6">
           {/* Step 1 — Cast Configuration */}
           <div className="space-y-4 pt-4 border-t border-app-border">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <label className="text-xs font-bold text-app-dim uppercase tracking-wider">
-                <span className="text-emerald-400">Step 1</span> — Cast Configuration
+                <span className="text-emerald-400">Step 1</span> — {t('studio.step1CastConfig')}
               </label>
               <div className="flex items-center gap-2">
                 <button
@@ -379,7 +470,7 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
                   className="px-2 py-1 bg-purple-500/10 border border-purple-500/30 rounded text-[10px] font-bold text-purple-400 hover:bg-purple-500/20 flex items-center gap-1 transition-colors"
                 >
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                  Manage Cast
+                  {t('studio.manageCast')}
                 </button>
                 <button
                   onClick={() => setShowBios(!showBios)}
@@ -388,12 +479,12 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
                   {showBios ? (
                     <>
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268-2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-                      Hide Bios
+                      {t('studio.hideBios')}
                     </>
                   ) : (
                     <>
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                      Show Bios
+                      {t('studio.showBios')}
                     </>
                   )}
                 </button>
@@ -401,23 +492,27 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-              {castCard('host', 'Host / Cast Member', 'host', 'H')}
-              {castCard('expert', 'Expert / Cast Member', 'expert', 'E')}
-              {castCard('guest', 'Guest / Cast Member', 'guest', 'G')}
+              {castCard('host', t('studio.hostRole'), 'host', 'H')}
+              {castCard('expert', t('studio.expertRole'), 'expert', 'E')}
+              {castCard('guest', t('studio.guestRole'), 'guest', 'G')}
             </div>
           </div>
 
           {/* Target Length */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Target Length</label>
+            <label className="text-xs font-bold text-app-dim uppercase tracking-wider">{t('studio.targetLength')}</label>
             <div className="grid grid-cols-3 gap-2">
-              {['Short (1-2 min)', 'Medium (3-5 min)', 'Long (Deep Dive)'].map((len) => (
+              {([
+                { value: 'Short (1-2 min)', label: t('studio.short') },
+                { value: 'Medium (3-5 min)', label: t('studio.medium') },
+                { value: 'Long (Deep Dive)', label: t('studio.long') },
+              ] as const).map(({ value, label }) => (
                 <button
-                  key={len}
-                  onClick={() => onUpdateVoiceSettings({ ...voiceSettings, length: len as any })}
-                  className={`p-2 rounded-lg border text-xs font-bold transition-all ${voiceSettings.length === len ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-card border-app-border text-app-dim hover:text-app-text'}`}
+                  key={value}
+                  onClick={() => onUpdateVoiceSettings({ ...voiceSettings, length: value as any })}
+                  className={`p-2 rounded-lg border text-xs font-bold transition-all ${voiceSettings.length === value ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-card border-app-border text-app-dim hover:text-app-text'}`}
                 >
-                  {len.split(' ')[0]}
+                  {label}
                 </button>
               ))}
             </div>
@@ -425,12 +520,12 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
 
           {/* Language Selection */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Podcast Language</label>
+            <label className="text-xs font-bold text-app-dim uppercase tracking-wider">{t('studio.podcastLanguage')}</label>
             <div className="grid grid-cols-2 gap-2">
-              {['English', 'Swedish'].map((lang) => (
+              {(['English', 'Swedish'] as const).map((lang) => (
                 <button
                   key={lang}
-                  onClick={() => onUpdateVoiceSettings({ ...voiceSettings, language: lang as any })}
+                  onClick={() => handleLanguageChange(lang)}
                   className={`p-2 rounded-lg border text-xs font-bold transition-all ${voiceSettings.language === lang || (!voiceSettings.language && lang === 'English') ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-card border-app-border text-app-dim hover:text-app-text'}`}
                 >
                   {lang === 'Swedish' ? 'Svenska' : 'English'}
@@ -442,12 +537,12 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
           {/* Step 2 — Format (picked last, after the cast is configured) */}
           <div className={`space-y-2 transition-opacity ${hostConfigured ? '' : 'opacity-60'}`}>
             <label className="text-xs font-bold text-app-dim uppercase tracking-wider">
-              <span className="text-emerald-400">Step 2</span> — Format
+              <span className="text-emerald-400">Step 2</span> — {t('studio.step2Format')}
             </label>
             {!hostConfigured && (
               <div className="flex items-center gap-2 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
                 <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                 </svg>
                 {t('studio.configureSpeakersHint')}
               </div>
@@ -499,7 +594,7 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
               <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
-              Podcast Content / Topic Input
+              {t('studio.contentTopicInput')}
             </h3>
             {hasActiveSession ? (
               <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -509,11 +604,11 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
                   onChange={(e) => setPodcastIncludeSessionData(e.target.checked)}
                   className="rounded border-zinc-700 bg-zinc-900 text-purple-600 focus:ring-purple-500/50 h-4 w-4"
                 />
-                <span className="text-xs text-app-dim hover:text-app-text transition-colors">Include Session Data</span>
+                <span className="text-xs text-app-dim hover:text-app-text transition-colors">{t('studio.includeSessionData')}</span>
               </label>
             ) : (
               <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700">
-                Custom Input Only (No Session)
+                {t('studio.customInputOnly')}
               </span>
             )}
           </div>
@@ -526,8 +621,8 @@ const PodcastCreator: React.FC<PodcastCreatorProps> = ({
               className="w-full bg-zinc-950/60 border border-app-border rounded-lg p-3 text-xs text-app-text focus:outline-none focus:border-purple-500/80 resize-none h-44 placeholder-white/20 shadow-inner"
             />
             <div className="flex justify-between items-center text-[10px] text-app-dim">
-              <span>{podcastCustomInput.length} characters</span>
-              <span>Session data use is optional</span>
+              <span>{podcastCustomInput.length} {t('studio.characters')}</span>
+              <span>{t('studio.sessionDataOptional')}</span>
             </div>
           </div>
         </div>

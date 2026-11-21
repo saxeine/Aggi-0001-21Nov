@@ -71,6 +71,14 @@ describe('buildToolPrompt', () => {
     }
   });
 
+  it('uses payload.length override when provided for quick-regenerate length changes', () => {
+    const { prompt } = buildToolPrompt('podcast_2', { length: 'Long (Deep Dive)' }, voice);
+    expect(prompt).toContain('Long (Deep Dive)');
+    const { prompt: hostOnlyPrompt } = buildToolPrompt('podcast_2', { hostOnly: true, length: 'Short (1-2 min)' }, voice);
+    expect(hostOnlyPrompt).toContain('Single-Host Podcast');
+    expect(hostOnlyPrompt).toContain('Short (1-2 min)');
+  });
+
   it('podcast prompts end with a raw-markdown instruction', () => {
     const { prompt } = buildToolPrompt('podcast_1', {}, voice);
     expect(prompt).toContain('Return ONLY the raw Markdown');

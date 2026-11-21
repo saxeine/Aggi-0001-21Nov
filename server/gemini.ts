@@ -63,13 +63,13 @@ export const formatGeminiError = (error: any) => {
 };
 
 let lastRequestTime = 0;
-const MIN_REQUEST_SPACING = 3000; // 3 seconds spacing to help stay within rate limits
+const MIN_REQUEST_SPACING = 300; // Lightweight spacing to avoid burst spikes without stalling UI
 const queue: (() => Promise<void>)[] = [];
 let activeRequests = 0;
-const MAX_CONCURRENT = 1;
+const MAX_CONCURRENT = 3;
 
 const processQueue = () => {
-  if (activeRequests < MAX_CONCURRENT && queue.length > 0) {
+  while (activeRequests < MAX_CONCURRENT && queue.length > 0) {
     activeRequests++;
     const task = queue.shift();
     task?.();
@@ -102,22 +102,35 @@ export const runInQueue = async <T>(fn: () => Promise<T>): Promise<T> => {
   });
 };
 
+const summarizeTransientReason = (msg: string): string => {
+  if (msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('overloaded') || msg.includes('high demand')) {
+    return 'service temporarily busy (503)';
+  }
+  if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
+    return 'rate limited (429)';
+  }
+  if (msg.includes('500') || msg.includes('Internal error')) {
+    return 'upstream server issue (500)';
+  }
+  return 'transient upstream issue';
+};
 
 // Retry wrapper for API calls
-export const callWithRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000): Promise<T> => {
+export const callWithRetry = async <T>(fn: () => Promise<T>, retries = 1, delay = 800): Promise<T> => {
   try {
     return await fn();
   } catch (error: any) {
     const msg = error.message || JSON.stringify(error) || "";
 
-    // Attempt to extract retry delay from error details if available
+    // Attempt to extract retry delay from error details if available (capped to avoid long stalls)
     let retryDelay = delay;
     if (error && error.details) {
       const retryInfo = error.details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
       if (retryInfo && retryInfo.retryDelay) {
         const seconds = parseFloat(retryInfo.retryDelay);
-        retryDelay = seconds * 1000;
-        console.log(`[Status] Adjusting retry delay to ${retryDelay}ms`);
+        if (!Number.isNaN(seconds) && seconds > 0) {
+          retryDelay = Math.min(seconds * 1000, 3000);
+        }
       }
     }
 
@@ -130,25 +143,27 @@ export const callWithRetry = async <T>(fn: () => Promise<T>, retries = 2, delay 
                                  msg.includes("limit: 0");
 
     if (isHardQuotaExceeded) {
-      console.log("[Status] Gemini quota exhausted — skipping retries.");
       throw error;
     }
 
+    const isModelOverloaded = msg.includes("503") ||
+                              msg.includes("UNAVAILABLE") ||
+                              msg.includes("overloaded") ||
+                              msg.includes("high demand");
+
     // We retry on transient rate limits (429) AND service overloaded (503/500)
-    const isRetriable = msg.includes("429") ||
+    const isRetriable = isModelOverloaded ||
+                         msg.includes("429") ||
                          msg.includes("RESOURCE_EXHAUSTED") ||
                          msg.includes("quota") ||
-                         msg.includes("503") ||
-                         msg.includes("UNAVAILABLE") ||
-                         msg.includes("overloaded") ||
-                         msg.includes("high demand") ||
                          msg.includes("500") ||
                          msg.includes("Internal error");
 
     if (retries > 0 && isRetriable) {
-      console.log(`[Status] Request deferred (${msg.substring(0, 50)}...). Retrying in ${Math.round(retryDelay)}ms... (${retries} remaining)`);
-      await new Promise(res => setTimeout(res, retryDelay));
-      const nextDelay = retryDelay * 1.5 + Math.random() * 1000;
+      const waitMs = isModelOverloaded ? Math.min(retryDelay, 600) : retryDelay;
+      console.info(`[Gemini] Transient ${summarizeTransientReason(msg)}; retrying in ${Math.round(waitMs)}ms (${retries} remaining).`);
+      await new Promise(res => setTimeout(res, waitMs));
+      const nextDelay = retryDelay * 1.5 + Math.random() * 500;
       return callWithRetry(fn, retries - 1, nextDelay);
     }
     throw error;
@@ -159,8 +174,8 @@ export const callWithRetry = async <T>(fn: () => Promise<T>, retries = 2, delay 
 export const generateContentWithFallback = async (
   ai: ReturnType<typeof getAiClient>,
   params: any,
-  retries = 2,
-  delay = 1500
+  retries = 1,
+  delay = 600
 ): Promise<any> => {
   const originalModel = params.model || "";
   try {
@@ -202,16 +217,18 @@ export const generateContentWithFallback = async (
 
       const fallbackCandidates = isTtsRequest
         ? (isMultiSpeakerTts ? ['gemini-3.8-flash-tts'] : ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'])
-        : ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+        : ['gemini-3.1-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-pro-preview'];
 
       for (const fallbackModel of fallbackCandidates) {
         if (fallbackModel !== originalModel) {
-          console.log(`[Routing] Model ${originalModel} failed (${msg.substring(0, 40)}...). Trying fallback ${fallbackModel}...`);
+          console.info(`[Routing] Model ${originalModel} unavailable (${summarizeTransientReason(msg)}). Falling back to ${fallbackModel}.`);
           try {
             const fallbackParams = sanitizeGeminiParams({ ...params, model: fallbackModel });
-            return await runInQueue(async () => await ai.models.generateContent(fallbackParams));
+            return await runInQueue(async () => await callWithRetry(async () => {
+              return await ai.models.generateContent(fallbackParams);
+            }, 1, 500));
           } catch (fbErr: any) {
-            console.log(`[Routing] Fallback model ${fallbackModel} unavailable: ${formatGeminiError(fbErr)}`);
+            console.info(`[Routing] Fallback model ${fallbackModel} unavailable: ${formatGeminiError(fbErr)}`);
           }
         }
       }

@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { MediaItem } from '../types';
 
 interface MediaViewerProps {
@@ -8,6 +8,55 @@ interface MediaViewerProps {
 }
 
 const MediaViewer: React.FC<MediaViewerProps> = ({ item, onClose }) => {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const prevVolumeRef = useRef(1);
+
+  useEffect(() => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+  }, [item.id]);
+
+  const formatAudioTime = (time: number) => {
+    if (!Number.isFinite(time) || time < 0) return '0:00';
+    const min = Math.floor(time / 60);
+    const sec = Math.floor(time % 60);
+    return `${min}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  const toggleAudioPlay = () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (isPlaying) {
+      el.pause();
+    } else {
+      el.play().catch(() => {});
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleAudioVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const vol = Number(e.target.value);
+    setVolume(vol);
+    if (vol > 0) prevVolumeRef.current = vol;
+    if (audioRef.current) {
+      audioRef.current.volume = vol;
+      audioRef.current.muted = vol === 0;
+    }
+  };
+
+  const toggleAudioMute = () => {
+    const nextVol = volume > 0 ? 0 : (prevVolumeRef.current > 0 ? prevVolumeRef.current : 1);
+    setVolume(nextVol);
+    if (audioRef.current) {
+      audioRef.current.volume = nextVol;
+      audioRef.current.muted = nextVol === 0;
+    }
+  };
   
   // Helper to decode Base64 content for text viewing
   const decodedContent = useMemo(() => {
@@ -48,18 +97,98 @@ const MediaViewer: React.FC<MediaViewerProps> = ({ item, onClose }) => {
         );
       case 'audio':
         return (
-          <div className="flex flex-col items-center justify-center h-full bg-gradient-to-b from-gray-200 to-gray-300">
+          <div className="flex flex-col items-center justify-center h-full px-6 bg-gradient-to-b from-gray-200 to-gray-300">
             <div className="w-40 h-40 bg-gray-100 rounded-full flex items-center justify-center mb-10 shadow-xl relative overflow-hidden border-4 border-white/50">
               <div className="absolute inset-0 bg-blue-500/10 animate-pulse"></div>
               <svg xmlns="http://www.w3.org/2000/svg" className="h-20 w-20 text-blue-600 relative z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
               </svg>
             </div>
-            <audio 
-              src={`data:${item.mimeType};base64,${item.data}`} 
-              controls 
-              className="w-full max-w-md shadow-2xl rounded-full active-media-viewer bg-gray-100"
+            <audio
+              ref={audioRef}
+              src={`data:${item.mimeType};base64,${item.data}`}
+              onTimeUpdate={() => {
+                if (audioRef.current) {
+                  setCurrentTime(audioRef.current.currentTime);
+                  setDuration(audioRef.current.duration || 0);
+                }
+              }}
+              onLoadedMetadata={() => {
+                if (audioRef.current) {
+                  setDuration(audioRef.current.duration || 0);
+                }
+              }}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => setIsPlaying(false)}
+              className="hidden"
             />
+            <div className="w-full max-w-lg bg-white/95 text-slate-800 rounded-2xl p-4 shadow-2xl border border-gray-300 flex flex-wrap items-center gap-3 active-media-viewer">
+              <button
+                type="button"
+                onClick={toggleAudioPlay}
+                className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 transition-colors"
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying ? (
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>
+                ) : (
+                  <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                )}
+              </button>
+              <div className="flex-1 min-w-[140px] flex flex-col">
+                <input
+                  type="range"
+                  min="0"
+                  max={duration || 100}
+                  step="0.1"
+                  value={currentTime}
+                  onChange={(e) => {
+                    const t = Number(e.target.value);
+                    setCurrentTime(t);
+                    if (audioRef.current) audioRef.current.currentTime = t;
+                  }}
+                  aria-label="Seek audio"
+                  className="w-full h-1.5 accent-blue-600 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] font-mono text-gray-500 mt-1">
+                  <span>{formatAudioTime(currentTime)}</span>
+                  <span>{formatAudioTime(duration)}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 bg-gray-100 px-2.5 py-1.5 rounded-full border border-gray-200">
+                <button
+                  type="button"
+                  onClick={toggleAudioMute}
+                  className="text-gray-600 hover:text-gray-900"
+                  title={volume === 0 ? 'Unmute' : 'Mute'}
+                  aria-label={volume === 0 ? 'Unmute' : 'Mute'}
+                >
+                  {volume === 0 ? (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    </svg>
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={volume}
+                  onChange={handleAudioVolume}
+                  aria-label="Volume"
+                  title="Adjust volume"
+                  className="w-24 h-1.5 accent-blue-600 cursor-pointer"
+                />
+                <span className="text-[10px] font-mono text-gray-600 w-8 text-right">{Math.round(volume * 100)}%</span>
+              </div>
+            </div>
           </div>
         );
       case 'pdf':
