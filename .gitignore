@@ -25,3 +25,6 @@ dist-ssr
 
 # Generated git bundle used to publish to a fresh repo (aDOCS/PUBLISH-MAGGI.md)
 *.bundle
+
+# Firebase web config is injected via VITE_FIREBASE_* env vars (see .env.example)
+firebase-applet-config.json

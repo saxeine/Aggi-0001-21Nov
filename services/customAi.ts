@@ -72,11 +72,11 @@ export const generateCustomAIResponse = async (
   const response = await fetch('/api/custom-ai', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...(apiKey ? { 'x-custom-ai-key': apiKey } : {}),
     },
     body: JSON.stringify({
       baseUrl,
-      apiKey,
       modelName,
       apiPath,
       messages
@@ -136,11 +136,11 @@ export const generateCustomAISuggestions = async (
     const response = await fetch('/api/custom-ai', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...(apiKey ? { 'x-custom-ai-key': apiKey } : {}),
       },
       body: JSON.stringify({
         baseUrl,
-        apiKey,
         modelName,
         apiPath,
         messages

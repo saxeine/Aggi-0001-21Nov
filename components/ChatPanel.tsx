@@ -223,26 +223,26 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
     return parts.map((part, idx) => {
       if (part.type === 'code') {
-        const canPreview = ['html', 'javascript', 'js', 'react', 'tsx', 'jsx'].includes(part.lang?.toLowerCase() || '');
+        const canPreview = ['html', 'javascript', 'js', 'react', 'tsx', 'jsx'].includes((part.lang || '').toLowerCase());
         return (
           <div key={idx} className="my-4 rounded-lg overflow-hidden border border-app-border bg-black/30">
              <div className="flex items-center justify-between px-3 py-1.5 bg-black/50 border-b border-app-border">
                 <span className="text-xs font-mono text-app-dim lowercase">{part.lang}</span>
                 <div className="flex gap-2">
                    {canPreview && (
-                     <button onClick={() => onPreviewArtifact(part.code)} className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 font-bold transition-colors">
+                     <button onClick={() => onPreviewArtifact(part.code || '')} className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 font-bold transition-colors">
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z" /><path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" /></svg>
                        {t('chat.openPreview')}
                      </button>
                    )}
-                   <button onClick={() => navigator.clipboard.writeText(part.code)} className="text-xs text-app-dim hover:text-app-text">{t('chat.copy')}</button>
+                   <button onClick={() => navigator.clipboard.writeText(part.code || '')} className="text-xs text-app-dim hover:text-app-text">{t('chat.copy')}</button>
                 </div>
              </div>
              <pre className="p-3 text-xs font-mono overflow-x-auto text-app-text/90">{part.code}</pre>
           </div>
         );
       } else {
-        const mixedContent = part.content;
+        const mixedContent = (part.content || '') as string;
         // Pre-process timestamps to markdown links
         const processedContent = mixedContent.replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '[$1](seek:$1)');
         

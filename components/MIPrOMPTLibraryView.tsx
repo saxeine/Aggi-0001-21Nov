@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MIPrOMPTItem } from '../types';
 import ArtifactPreview from './ArtifactPreview';
 import { saveUserPreference, loadUserPreference } from '../services/storage';
-import { themeStyles } from '../constants/creativeStudioTheme';
+import { themeStyles, CREATIVE_STUDIO_THEMES } from '../constants/creativeStudioTheme';
 
 const FormattedPromptText: React.FC<{ text: string, className?: string }> = ({ text, className }) => {
   if (!text) return null;
@@ -34,7 +34,7 @@ interface MIPrOMPTLibraryViewProps {
 }
 
 const MIPrOMPTLibraryView: React.FC<MIPrOMPTLibraryViewProps> = ({ miprompts, onAdd, onUpdate, onDelete, onImport, onSelectPrompt, currentTheme }) => {
-  const themes = ['charcoal', 'silver', 'white', 'cosmic', 'emerald', 'amber', 'cyberpunk', 'slate', 'crimson', 'orchid', 'olive'];
+  const themes = CREATIVE_STUDIO_THEMES;
   const [localTheme, setLocalTheme] = useState(() => {
     const saved = localStorage.getItem('creative_studio_theme');
     return saved && themes.includes(saved) ? saved : 'charcoal';
@@ -84,7 +84,7 @@ const MIPrOMPTLibraryView: React.FC<MIPrOMPTLibraryViewProps> = ({ miprompts, on
   };
 
   const handleCycleTheme = () => {
-    const themes = ['charcoal', 'silver', 'white', 'cosmic', 'emerald', 'amber', 'cyberpunk', 'slate', 'crimson', 'orchid', 'olive'];
+    const themes = CREATIVE_STUDIO_THEMES;
     const currentThemeLocal = localStorage.getItem('creative_studio_theme') || 'charcoal';
     const nextIndex = (themes.indexOf(currentThemeLocal) + 1) % themes.length;
     const nextTheme = themes[nextIndex];

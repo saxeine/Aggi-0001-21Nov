@@ -5,7 +5,9 @@ import { Upload, Crop as CropIcon, Grid, Download, Settings, Check, Image as Ima
 import { cn } from "../../utils";
 import { getCroppedImg, sliceImage } from "../../imageUtils";
 import JSZip from "jszip";
-import { saveAs } from "file-saver";
+// The pre-bundled CommonJS module only exposes a default export (the saveAs function).
+import FileSaver from 'file-saver';
+const saveAs = FileSaver;
 
 type Mode = "crop" | "carve";
 

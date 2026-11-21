@@ -1,4 +1,6 @@
 import ToolOrderSettingsModal from './ToolOrderSettingsModal';
+import PodcastCreator from './PodcastCreator';
+import { requiredRolesFor } from '../utils/podcastGating';
 import React, { useState, useEffect } from 'react';
 import { VoiceSettings, Session, MediaItem, PromptTemplate, CastMember } from '../types';
 import ArtifactPreview from './ArtifactPreview';
@@ -16,7 +18,7 @@ import { ProductResearchTool } from './CreationStudio/ProductResearchTool';
 import { SocialMediaSuite } from './CreationStudio/SocialMediaSuite';
 import { QuizAssessmentCreator } from './CreationStudio/QuizAssessmentCreator';
 import { ExecutiveBriefing } from './CreationStudio/ExecutiveBriefing';
-import { themeStyles } from '../constants/creativeStudioTheme';
+import { themeStyles, CREATIVE_STUDIO_THEMES } from '../constants/creativeStudioTheme';
 import { Brainstormer } from './CreationStudio/Brainstormer';
 import { EmailDrafter } from './CreationStudio/EmailDrafter';
 import { MarketingCopywriter } from './CreationStudio/MarketingCopywriter';
@@ -69,7 +71,6 @@ interface OfficeToolsProps {
   onSaveArtifact?: (item: MediaItem) => void;
 }
 
-
 const OfficeTools: React.FC<OfficeToolsProps> = ({
   onBack,
   currentTheme,
@@ -109,7 +110,7 @@ const OfficeTools: React.FC<OfficeToolsProps> = ({
   const { t } = useLanguage();
   const [localTheme, setLocalTheme] = useState<'charcoal' | 'silver' | 'white' | 'cosmic' | 'emerald' | 'amber' | 'cyberpunk' | 'slate' | 'crimson' | 'orchid' | 'olive'>(() => {
     const saved = localStorage.getItem('creative_studio_theme') as any;
-    const allowed = ['charcoal', 'silver', 'white', 'cosmic', 'emerald', 'amber', 'cyberpunk', 'slate', 'crimson', 'orchid', 'olive'];
+    const allowed = CREATIVE_STUDIO_THEMES;
     if (saved && allowed.includes(saved)) {
       return saved;
     }
@@ -119,7 +120,7 @@ const OfficeTools: React.FC<OfficeToolsProps> = ({
   useEffect(() => {
     const handleThemeChange = () => {
       const saved = localStorage.getItem('creative_studio_theme') as any;
-      const allowed = ['charcoal', 'silver', 'white', 'cosmic', 'emerald', 'amber', 'cyberpunk', 'slate', 'crimson', 'orchid', 'olive'];
+      const allowed = CREATIVE_STUDIO_THEMES;
       if (saved && allowed.includes(saved)) {
         setLocalTheme(saved);
       }
@@ -132,20 +133,6 @@ const OfficeTools: React.FC<OfficeToolsProps> = ({
 
   const st = themeStyles[localTheme];
 
-  const availableVoices = [
-      { name: 'Puck', gender: 'Male', style: 'Deep', lang: 'English' },
-      { name: 'Charon', gender: 'Male', style: 'Deep', lang: 'English' },
-      { name: 'Kore', gender: 'Female', style: 'Calm', lang: 'English' },
-      { name: 'Fenrir', gender: 'Male', style: 'Intense', lang: 'English' },
-      { name: 'Zephyr', gender: 'Female', style: 'High', lang: 'English' },
-      { name: 'Aoede', gender: 'Female', style: 'Soft', lang: 'English' },
-      { name: 'Lars', gender: 'Male', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Fenrir' },
-      { name: 'Elena', gender: 'Female', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Zephyr' },
-      { name: 'Astrid', gender: 'Female', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Kore' },
-      { name: 'Oskar', gender: 'Male', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Puck' },
-      { name: 'Freja', gender: 'Female', style: 'Swedish-Natural', lang: 'Swedish', voice: 'Aoede' },
-  ];
-
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -155,8 +142,6 @@ const OfficeTools: React.FC<OfficeToolsProps> = ({
   const [volume, setVolume] = useState(1);
   const [showHistory, setShowHistory] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [podcastCustomInput, setPodcastCustomInput] = useState('');
-  const [podcastIncludeSessionData, setPodcastIncludeSessionData] = useState(hasActiveSession);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [globalPodcastHistory, setGlobalPodcastHistory] = useState<MediaItem[]>([]);
 
@@ -181,18 +166,8 @@ const OfficeTools: React.FC<OfficeToolsProps> = ({
     };
   }, []);
 
-  useEffect(() => {
-    setPodcastIncludeSessionData(hasActiveSession);
-  }, [hasActiveSession]);
   const [editItemName, setEditItemName] = useState('');
   const [showPrompts, setShowPrompts] = useState(false);
-  const [showBios, setShowBios] = useState(false);
-  const [selectedHostCastMemberId, setSelectedHostCastMemberId] = useState<string | null>(null);
-  const [selectedExpertCastMemberId, setSelectedExpertCastMemberId] = useState<string | null>(null);
-  const [selectedGuestCastMemberId, setSelectedGuestCastMemberId] = useState<string | null>(null);
-  const [hostGenderFilter, setHostGenderFilter] = useState<'All' | 'Male' | 'Female'>('All');
-  const [expertGenderFilter, setExpertGenderFilter] = useState<'All' | 'Male' | 'Female'>('All');
-  const [guestGenderFilter, setGuestGenderFilter] = useState<'All' | 'Male' | 'Female'>('All');
 
   // Bring Anything To Life State
   const [bringToLifeHistory, setBringToLifeHistory] = useState<Creation[]>([]);
@@ -221,57 +196,6 @@ const OfficeTools: React.FC<OfficeToolsProps> = ({
     localStorage.setItem('bring_to_life_history', JSON.stringify(bringToLifeHistory));
   }, [bringToLifeHistory]);
 
-  // Sync selection state with voice settings
-  useEffect(() => {
-    const isSwedish = voiceSettings.language === 'Swedish';
-    
-    // Check if current selection matches voice Settings
-    const currentHostCM = castLibrary.find(m => m.id === selectedHostCastMemberId);
-    if (voiceSettings.host && (!selectedHostCastMemberId || currentHostCM?.voice !== voiceSettings.host)) {
-      const match = castLibrary.find(m => {
-        if (isSwedish) {
-          return m.voice === voiceSettings.host && (m.id.includes('-sv-') || m.name.includes('Lars') || m.name.includes('Elena'));
-        }
-        return m.voice === voiceSettings.host && !m.id.includes('-sv-');
-      });
-      if (match) {
-        setSelectedHostCastMemberId(match.id);
-      } else {
-        setSelectedHostCastMemberId(null);
-      }
-    }
-    
-    const currentExpertCM = castLibrary.find(m => m.id === selectedExpertCastMemberId);
-    if (voiceSettings.expert && (!selectedExpertCastMemberId || currentExpertCM?.voice !== voiceSettings.expert)) {
-      const match = castLibrary.find(m => {
-        if (isSwedish) {
-          return m.voice === voiceSettings.expert && (m.id.includes('-sv-') || m.name.includes('Elena') || m.name.includes('Astrid'));
-        }
-        return m.voice === voiceSettings.expert && !m.id.includes('-sv-');
-      });
-      if (match) {
-        setSelectedExpertCastMemberId(match.id);
-      } else {
-        setSelectedExpertCastMemberId(null);
-      }
-    }
-    
-    const currentGuestCM = castLibrary.find(m => m.id === selectedGuestCastMemberId);
-    if (voiceSettings.guest && (!selectedGuestCastMemberId || currentGuestCM?.voice !== voiceSettings.guest)) {
-      const match = castLibrary.find(m => {
-        if (isSwedish) {
-          return m.voice === voiceSettings.guest && (m.id.includes('-sv-') || m.name.includes('Astrid') || m.name.includes('Oskar') || m.name.includes('Freja'));
-        }
-        return m.voice === voiceSettings.guest && !m.id.includes('-sv-');
-      });
-      if (match) {
-        setSelectedGuestCastMemberId(match.id);
-      } else {
-        setSelectedGuestCastMemberId(null);
-      }
-    }
-  }, [voiceSettings, castLibrary, selectedHostCastMemberId, selectedExpertCastMemberId, selectedGuestCastMemberId]);
-  
   // Interactive Editing State
   const [isEditingScript, setIsEditingScript] = useState(false);
   const [scriptContent, setScriptContent] = useState('');
@@ -671,17 +595,6 @@ You MUST return ONLY a valid raw JSON object matching the following TypeScript s
       }
   };
 
-  const handleAvatarUpload = (role: 'host' | 'expert' | 'guest', file: File) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-          const result = e.target?.result as string;
-          if (role === 'host') onUpdateVoiceSettings({ ...voiceSettings, hostAvatar: result });
-          if (role === 'expert') onUpdateVoiceSettings({ ...voiceSettings, expertAvatar: result });
-          if (role === 'guest') onUpdateVoiceSettings({ ...voiceSettings, guestAvatar: result });
-      };
-      reader.readAsDataURL(file);
-  };
-
   const handleInteractiveEdit = () => {
       if (!previewCode) return;
       
@@ -795,32 +708,33 @@ You MUST return ONLY a valid raw JSON object matching the following TypeScript s
       return `${min}:${sec.toString().padStart(2, '0')}`;
   };
 
-  const handleFormatChange = (format: 'podcast_1' | 'podcast_2' | 'podcast_3') => {
-      // If we are already in the player view (previewCode exists), regenerate immediately
-      if (previewCode) {
-          onRunTool(format);
-      } else {
-          // Just run it (which switches to player view)
-          onRunTool(format);
-      }
-  };
+  // Track active format. Starts as null: the creator gate requires an explicit
+  // format pick before any podcast is produced.
+  const [activeFormat, setActiveFormat] = useState<'podcast_1' | 'podcast_2' | 'podcast_3' | null>(null);
 
-  const handleLengthChange = (len: string) => {
-      const newSettings = { ...voiceSettings, length: len as any };
-      onUpdateVoiceSettings(newSettings);
-      
-      // If we are already in the player view, regenerate immediately with new length
-      // We need to know the current format. 
-      // Since we don't store activeFormat in state, we can infer it or just default to podcast_1 if not tracked.
-      // Better to track activeFormat.
+  // Roles the user explicitly configured (cast member picked / display name / avatar).
+  // Shared with the player header so quick-regenerate honors the same rule.
+  const [touchedRoles, setTouchedRoles] = useState<Array<'host' | 'expert' | 'guest'>>([]);
+  const configuredRoles = (['host', 'expert', 'guest'] as const).filter(r => touchedRoles.includes(r));
+  const multipleConfigured = configuredRoles.length > 1;
+
+  // Mirror the creator gate: more than one speaker configured OR a format
+  // whose required speakers are missing => position one (host) only.
+  const hostOnlyFor = (format: 'podcast_1' | 'podcast_2' | 'podcast_3') => {
+      const missing = requiredRolesFor(format).filter(r => !configuredRoles.includes(r));
+      return multipleConfigured || missing.length > 0;
   };
-  
-  // Track active format
-  const [activeFormat, setActiveFormat] = useState<'podcast_1' | 'podcast_2' | 'podcast_3'>('podcast_1');
 
   const runFormat = (format: 'podcast_1' | 'podcast_2' | 'podcast_3') => {
       setActiveFormat(format);
-      onRunTool(format);
+      const hostOnly = hostOnlyFor(format);
+      // Only the speaker in position one (host) is used when more than one
+      // speaker is configured or a required speaker is missing.
+      onRunTool(format, {
+          isIndependent: true,
+          hostOnly,
+          speakerCount: hostOnly ? 1 : format === 'podcast_2' ? 2 : format === 'podcast_3' ? 3 : 1,
+      });
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -941,13 +855,6 @@ You MUST return ONLY a valid raw JSON object matching the following TypeScript s
     reader.readAsText(file);
   };
 
-  // Set defaults on mount
-  React.useEffect(() => {
-      // Force defaults for "Solo monologue start interface"
-      onUpdateVoiceSettings({ ...voiceSettings, length: 'Short (1-2 min)' });
-      setActiveFormat('podcast_1');
-  }, []);
-
   const handleHistoryItemClick = (item: MediaItem) => {
       if (onLoadAudio) {
           onLoadAudio(item);
@@ -1049,7 +956,7 @@ You MUST return ONLY a valid raw JSON object matching the following TypeScript s
                                             key={l}
                                             onClick={() => {
                                                 onUpdateVoiceSettings({ ...voiceSettings, length: fullLabel as any });
-                                                setTimeout(() => onRunTool(activeFormat), 100);
+                                                setTimeout(() => { const fmt = (activeFormat ?? 'podcast_1') as 'podcast_1' | 'podcast_2' | 'podcast_3'; const hostOnly = hostOnlyFor(fmt); onRunTool(fmt, { isIndependent: true, hostOnly, speakerCount: hostOnly ? 1 : (fmt === 'podcast_2' ? 2 : fmt === 'podcast_3' ? 3 : 1) }); }, 100);
                                             }} 
                                             className={`px-3 py-1 text-xs font-bold rounded ${voiceSettings.length?.startsWith(l) ? 'bg-app-text text-app-bg' : 'text-app-dim hover:text-app-text'}`}
                                         >
@@ -1447,21 +1354,6 @@ You MUST return ONLY a valid raw JSON object matching the following TypeScript s
   };
 
   
-  const handlePodcastGenerate = () => {
-    // Determine which podcast tool to run based on settings or user choice
-    // For now, let's default to podcast_2 (2-person) or allow selection
-    // But the toolId in App.tsx is 'podcast_1', 'podcast_2', 'podcast_3'
-    // We can add a selector in the UI
-    
-    // For this interactive creator, let's assume we want to run the tool with the current voice settings
-    // We might need to pass the 'topic' as instructions if the tool supports it
-    // The current handleToolAction uses activeSession media. 
-    // If we want to support "Topic" input here, we might need to add a text item to the session first?
-    // Or update handleToolAction to accept a custom prompt/context.
-    
-    // For now, let's assume it uses the active session's content.
-    onRunTool('podcast_2'); 
-  };
 
   return (
     <div className={`flex flex-col h-full w-full overflow-y-auto animate-fade-in p-6 md:p-10 transition-colors duration-300 ${st.bg} ${st.text}`}>
@@ -1906,577 +1798,21 @@ You MUST return ONLY a valid raw JSON object matching the following TypeScript s
             )}
 
             {activeTool === 'podcast_creator' && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-2xl font-bold text-app-text flex items-center gap-3">
-                        <span className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400">
-                          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                          </svg>
-                        </span>
-                        Podcast Creator
-                      </h2>
-                      <button 
-                          onClick={() => setShowHistory(true)}
-                          className="px-3 py-1.5 bg-app-card hover:bg-emerald-500/10 border border-app-border hover:border-emerald-500/50 rounded-lg text-xs font-bold text-emerald-500/70 hover:text-emerald-400 transition-colors flex items-center gap-2 mr-2"
-                      >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          History
-                      </button>
-                      <button 
-                          onClick={() => setShowPrompts(true)}
-                          className="px-3 py-1.5 bg-app-card hover:bg-blue-500/10 border border-app-border hover:border-blue-500/50 rounded-lg text-xs font-bold text-blue-500/70 hover:text-blue-400 transition-colors flex items-center gap-2 mr-2"
-                      >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          Prompts
-                      </button>
-                      <button 
-                          onClick={() => setIsCastLibraryOpen(true)}
-                          className="px-3 py-1.5 bg-app-card hover:bg-purple-500/10 border border-app-border hover:border-purple-500/50 rounded-lg text-xs font-bold text-purple-500/70 hover:text-purple-400 transition-colors flex items-center gap-2"
-                      >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.149-1.268.432-1.828M14 10a6 6 0 01-6 6H6a6 6 0 01-6-6V7a3 3 0 013-3h7a3 3 0 013 3v3zm-4 0a4 4 0 100-8 4 4 0 000 8z" />
-                          </svg>
-                          Cast
-                      </button>
-                  </div>
-                  <p className="text-app-dim mb-6">
-                    Configure your AI podcast hosts and generate a conversation based on your selected session content.
-                  </p>
-
-                  <div className="space-y-6">
-                    {/* Format Selection */}
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Format</label>
-                        <div className="grid grid-cols-3 gap-2">
-                            <button 
-                                onClick={() => setActiveFormat('podcast_1')} 
-                                className={`p-3 rounded-lg border transition-all text-left ${activeFormat === 'podcast_1' ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500' : 'border-app-border bg-app-card hover:border-emerald-500 hover:bg-emerald-500/10'}`}
-                            >
-                                <div className="font-bold text-sm text-emerald-400 mb-1">Solo</div>
-                                <div className="text-[10px] text-app-dim">Single host monologue</div>
-                            </button>
-                            <button 
-                                onClick={() => setActiveFormat('podcast_2')} 
-                                className={`p-3 rounded-lg border transition-all text-left ${activeFormat === 'podcast_2' ? 'border-blue-500 bg-blue-500/10 ring-1 ring-blue-500' : 'border-app-border bg-app-card hover:border-blue-500 hover:bg-blue-500/10'}`}
-                            >
-                                <div className="font-bold text-sm text-blue-400 mb-1">Duo</div>
-                                <div className="text-[10px] text-app-dim">Host & Expert dialogue</div>
-                            </button>
-                            <button 
-                                onClick={() => setActiveFormat('podcast_3')} 
-                                className={`p-3 rounded-lg border transition-all text-left ${activeFormat === 'podcast_3' ? 'border-purple-500 bg-purple-500/10 ring-1 ring-purple-500' : 'border-app-border bg-app-card hover:border-purple-500 hover:bg-purple-500/10'}`}
-                            >
-                                <div className="font-bold text-sm text-purple-400 mb-1">Roundtable</div>
-                                <div className="text-[10px] text-app-dim">3-person discussion</div>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Length Selection */}
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Target Length</label>
-                        <div className="grid grid-cols-3 gap-2">
-                            {['Short (1-2 min)', 'Medium (3-5 min)', 'Long (Deep Dive)'].map((len) => (
-                                <button
-                                    key={len}
-                                    onClick={() => onUpdateVoiceSettings({ ...voiceSettings, length: len as any })}
-                                    className={`p-2 rounded-lg border text-xs font-bold transition-all ${voiceSettings.length === len ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-card border-app-border text-app-dim hover:text-app-text'}`}
-                                >
-                                    {len.split(' ')[0]}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Language Selection */}
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Podcast Language</label>
-                        <div className="grid grid-cols-2 gap-2">
-                            {['English', 'Swedish'].map((lang) => (
-                                <button
-                                    key={lang}
-                                    onClick={() => onUpdateVoiceSettings({ ...voiceSettings, language: lang as any })}
-                                    className={`p-2 rounded-lg border text-xs font-bold transition-all ${voiceSettings.language === lang || (!voiceSettings.language && lang === 'English') ? 'bg-app-text text-app-bg border-app-text' : 'bg-app-card border-app-border text-app-dim hover:text-app-text'}`}
-                                >
-                                    {lang === 'Swedish' ? 'Svenska' : 'English'}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Voice Configuration */}
-                    <div className="space-y-4 pt-4 border-t border-app-border">
-                        <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold text-app-dim uppercase tracking-wider">Cast Configuration</label>
-                            <div className="flex items-center gap-2">
-                                <button 
-                                    onClick={() => setIsCastLibraryOpen(true)}
-                                    className="px-2 py-1 bg-purple-500/10 border border-purple-500/30 rounded text-[10px] font-bold text-purple-400 hover:bg-purple-500/20 flex items-center gap-1 transition-colors"
-                                >
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                    Manage Cast
-                                </button>
-                                <button 
-                                    onClick={() => setShowBios(!showBios)} 
-                                    className="px-2 py-1 bg-app-card border border-app-border rounded text-[10px] font-bold text-app-dim hover:text-app-text flex items-center gap-1 transition-colors"
-                                >
-                                    {showBios ? (
-                                        <>
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268-2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-                                            Hide Bios
-                                        </>
-                                    ) : (
-                                        <>
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                            Show Bios
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 gap-4">
-                            {/* Host Config */}
-                            <div className="flex items-start gap-3 p-3 rounded-lg bg-app-card border border-app-border">
-                                <div className="relative group cursor-pointer shrink-0">
-                                    <div className="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-xs overflow-hidden border border-blue-500/30">
-                                        {voiceSettings.hostAvatar ? (
-                                            <img src={voiceSettings.hostAvatar} alt="Host" className="w-full h-full object-cover" />
-                                        ) : (
-                                            "H"
-                                        )}
-                                    </div>
-                                    <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                    </div>
-                                    <input 
-                                        type="file" 
-                                        accept="image/*" 
-                                        className="absolute inset-0 opacity-0 cursor-pointer"
-                                        onChange={(e) => e.target.files?.[0] && handleAvatarUpload('host', e.target.files[0])}
-                                    />
-                                </div>
-                                <div className="flex-1 space-y-2 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <div className="flex-1 min-w-0 space-y-2">
-                                            <div>
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <div className="text-[10px] font-bold text-app-dim uppercase">Host / Cast Member</div>
-                                                    <div className="flex gap-1 bg-zinc-950 px-1 py-0.5 rounded border border-zinc-800">
-                                                        {(['All', 'Female', 'Male'] as const).map(g => (
-                                                            <button 
-                                                                key={g}
-                                                                type="button"
-                                                                onClick={() => setHostGenderFilter(g)}
-                                                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${hostGenderFilter === g ? 'bg-purple-500 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
-                                                            >
-                                                                {g === 'Female' && '♀ '}
-                                                                {g === 'Male' && '♂ '}
-                                                                {g}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                <select 
-                                                    value={selectedHostCastMemberId || ''}
-                                                    onChange={(e) => {
-                                                        const selectedId = e.target.value;
-                                                        setSelectedHostCastMemberId(selectedId);
-                                                        const selectedMember = castLibrary.find(m => m.id === selectedId);
-                                                        if (selectedMember) {
-                                                            const standardNames = ['Sax', 'Chameleon', 'The Pinpoint', 'Lars', 'Elena', 'Astrid', 'Oskar', 'Freja', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede', 'Narrator Bot', 'Dr. Insight', 'Curious Listener'];
-                                                            const currentLabel = voiceSettings.hostLabel || '';
-                                                            const isCustom = currentLabel && !standardNames.includes(currentLabel);
-                                                            
-                                                            const updates: any = {
-                                                                host: selectedMember.voice,
-                                                                hostAvatar: selectedMember.avatar,
-                                                                hostBio: selectedMember.bio
-                                                            };
-                                                            if (!isCustom) {
-                                                                updates.hostLabel = selectedMember.name;
-                                                            }
-                                                            onUpdateVoiceSettings({
-                                                                ...voiceSettings,
-                                                                ...updates
-                                                            });
-                                                        }
-                                                    }}
-                                                    className="bg-app-bg border border-app-border text-sm text-app-text rounded px-2 py-1 focus:outline-none w-full"
-                                                >
-                                                    <option value="">Select Cast Member...</option>
-                                                    {castLibrary.filter(m => {
-                                                        // Filter by language
-                                                        const langMatch = voiceSettings.language === 'Swedish'
-                                                            ? (m.name.includes('Lars') || m.id.includes('-sv-'))
-                                                            : !m.id.includes('-sv-');
-                                                        if (!langMatch) return false;
-                                                        
-                                                        // Filter by gender
-                                                        if (hostGenderFilter !== 'All') {
-                                                            return (m.gender || 'Female') === hostGenderFilter;
-                                                        }
-                                                        return true;
-                                                    }).map(member => (
-                                                        <option key={member.id} value={member.id}>
-                                                            {member.gender === 'Male' ? '♂' : '♀'} {member.name} ({member.voice} - {member.gender || 'Female'})
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <div className="text-[10px] font-bold text-app-dim uppercase">Display Name</div>
-                                                <input 
-                                                    type="text"
-                                                    value={voiceSettings.hostLabel || ''}
-                                                    onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, hostLabel: e.target.value })}
-                                                    placeholder="Rename Character..."
-                                                    className="bg-app-bg border border-app-border text-xs text-app-text rounded px-3 py-1.5 focus:outline-none w-full focus:border-purple-500 transition-colors"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {showBios && (
-                                        <div className="animate-fade-in">
-                                            <div className="text-[10px] font-bold text-app-dim uppercase mb-1">Bio / Vibe</div>
-                                            <textarea 
-                                                value={voiceSettings.hostBio || ''}
-                                                onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, hostBio: e.target.value })}
-                                                className="w-full bg-black/40 border border-app-border rounded-lg p-3 text-xs text-app-text focus:outline-none focus:border-purple-500 resize-none h-20 placeholder-white/20 shadow-inner"
-                                                placeholder="Describe personality..."
-                                            />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            
-                            {/* Expert Config */}
-                            <div className="flex items-start gap-3 p-3 rounded-lg bg-app-card border border-app-border">
-                                <div className="relative group cursor-pointer shrink-0">
-                                    <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 font-bold text-xs overflow-hidden border border-green-500/30">
-                                        {voiceSettings.expertAvatar ? (
-                                            <img src={voiceSettings.expertAvatar} alt="Expert" className="w-full h-full object-cover" />
-                                        ) : (
-                                            "E"
-                                        )}
-                                    </div>
-                                    <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                    </div>
-                                    <input 
-                                        type="file" 
-                                        accept="image/*" 
-                                        className="absolute inset-0 opacity-0 cursor-pointer"
-                                        onChange={(e) => e.target.files?.[0] && handleAvatarUpload('expert', e.target.files[0])}
-                                    />
-                                </div>
-                                <div className="flex-1 space-y-2 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <div className="flex-1 min-w-0 space-y-2">
-                                            <div>
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <div className="text-[10px] font-bold text-app-dim uppercase">Expert / Cast Member</div>
-                                                    <div className="flex gap-1 bg-zinc-950 px-1 py-0.5 rounded border border-zinc-800">
-                                                        {(['All', 'Female', 'Male'] as const).map(g => (
-                                                            <button 
-                                                                key={g}
-                                                                type="button"
-                                                                onClick={() => setExpertGenderFilter(g)}
-                                                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${expertGenderFilter === g ? 'bg-purple-500 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
-                                                            >
-                                                                {g === 'Female' && '♀ '}
-                                                                {g === 'Male' && '♂ '}
-                                                                {g}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                <select 
-                                                    value={selectedExpertCastMemberId || ''}
-                                                    onChange={(e) => {
-                                                        const selectedId = e.target.value;
-                                                        setSelectedExpertCastMemberId(selectedId);
-                                                        const selectedMember = castLibrary.find(m => m.id === selectedId);
-                                                        if (selectedMember) {
-                                                            const standardNames = ['Sax', 'Chameleon', 'The Pinpoint', 'Lars', 'Elena', 'Astrid', 'Oskar', 'Freja', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede', 'Narrator Bot', 'Dr. Insight', 'Curious Listener'];
-                                                            const currentLabel = voiceSettings.expertLabel || '';
-                                                            const isCustom = currentLabel && !standardNames.includes(currentLabel);
-                                                            
-                                                            const updates: any = {
-                                                                expert: selectedMember.voice,
-                                                                expertAvatar: selectedMember.avatar,
-                                                                expertBio: selectedMember.bio
-                                                            };
-                                                            if (!isCustom) {
-                                                                updates.expertLabel = selectedMember.name;
-                                                            }
-                                                            onUpdateVoiceSettings({
-                                                                ...voiceSettings,
-                                                                ...updates
-                                                            });
-                                                        }
-                                                    }}
-                                                    className="bg-app-bg border border-app-border text-sm text-app-text rounded px-2 py-1 focus:outline-none w-full"
-                                                >
-                                                    <option value="">Select Cast Member...</option>
-                                                    {castLibrary.filter(m => {
-                                                        // Filter by language
-                                                        const langMatch = voiceSettings.language === 'Swedish'
-                                                            ? (m.name.includes('Elena') || m.id.includes('-sv-'))
-                                                            : !m.id.includes('-sv-');
-                                                        if (!langMatch) return false;
-                                                        
-                                                        // Filter by gender
-                                                        if (expertGenderFilter !== 'All') {
-                                                            return (m.gender || 'Female') === expertGenderFilter;
-                                                        }
-                                                        return true;
-                                                    }).map(member => (
-                                                        <option key={member.id} value={member.id}>
-                                                            {member.gender === 'Male' ? '♂' : '♀'} {member.name} ({member.voice} - {member.gender || 'Female'})
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <div className="text-[10px] font-bold text-app-dim uppercase">Display Name</div>
-                                                <input 
-                                                    type="text"
-                                                    value={voiceSettings.expertLabel || ''}
-                                                    onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, expertLabel: e.target.value })}
-                                                    placeholder="Rename Character..."
-                                                    className="bg-app-bg border border-app-border text-xs text-app-text rounded px-3 py-1.5 focus:outline-none w-full focus:border-cyan-500 transition-colors"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {showBios && (
-                                        <div className="animate-fade-in">
-                                            <div className="text-[10px] font-bold text-app-dim uppercase mb-1">Bio / Vibe</div>
-                                            <textarea 
-                                                value={voiceSettings.expertBio || ''}
-                                                onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, expertBio: e.target.value })}
-                                                className="w-full bg-black/40 border border-app-border rounded-lg p-3 text-xs text-app-text focus:outline-none focus:border-cyan-500 resize-none h-20 placeholder-white/20 shadow-inner"
-                                                placeholder="Describe personality..."
-                                            />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Guest Config */}
-                            <div className="flex items-start gap-3 p-3 rounded-lg bg-app-card border border-app-border">
-                                <div className="relative group cursor-pointer shrink-0">
-                                    <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400 font-bold text-xs overflow-hidden border border-amber-500/30">
-                                        {voiceSettings.guestAvatar ? (
-                                            <img src={voiceSettings.guestAvatar} alt="Guest" className="w-full h-full object-cover" />
-                                        ) : (
-                                            "G"
-                                        )}
-                                    </div>
-                                    <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                    </div>
-                                    <input 
-                                        type="file" 
-                                        accept="image/*" 
-                                        className="absolute inset-0 opacity-0 cursor-pointer"
-                                        onChange={(e) => e.target.files?.[0] && handleAvatarUpload('guest', e.target.files[0])}
-                                    />
-                                </div>
-                                <div className="flex-1 space-y-2 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <div className="flex-1 min-w-0 space-y-2">
-                                            <div>
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <div className="text-[10px] font-bold text-app-dim uppercase">Guest / Cast Member</div>
-                                                    <div className="flex gap-1 bg-zinc-950 px-1 py-0.5 rounded border border-zinc-800">
-                                                        {(['All', 'Female', 'Male'] as const).map(g => (
-                                                            <button 
-                                                                key={g}
-                                                                type="button"
-                                                                onClick={() => setGuestGenderFilter(g)}
-                                                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${guestGenderFilter === g ? 'bg-purple-500 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
-                                                            >
-                                                                {g === 'Female' && '♀ '}
-                                                                {g === 'Male' && '♂ '}
-                                                                {g}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                <select 
-                                                    value={selectedGuestCastMemberId || ''}
-                                                    onChange={(e) => {
-                                                        const selectedId = e.target.value;
-                                                        setSelectedGuestCastMemberId(selectedId);
-                                                        const selectedMember = castLibrary.find(m => m.id === selectedId);
-                                                        if (selectedMember) {
-                                                            const standardNames = ['Sax', 'Chameleon', 'The Pinpoint', 'Lars', 'Elena', 'Astrid', 'Oskar', 'Freja', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede', 'Narrator Bot', 'Dr. Insight', 'Curious Listener'];
-                                                            const currentLabel = voiceSettings.guestLabel || '';
-                                                            const isCustom = currentLabel && !standardNames.includes(currentLabel);
-                                                            
-                                                            const updates: any = {
-                                                                guest: selectedMember.voice,
-                                                                guestAvatar: selectedMember.avatar,
-                                                                guestBio: selectedMember.bio
-                                                            };
-                                                            if (!isCustom) {
-                                                                updates.guestLabel = selectedMember.name;
-                                                            }
-                                                            onUpdateVoiceSettings({
-                                                                ...voiceSettings,
-                                                                ...updates
-                                                            });
-                                                        }
-                                                    }}
-                                                    className="bg-app-bg border border-app-border text-sm text-app-text rounded px-2 py-1 focus:outline-none w-full"
-                                                >
-                                                    <option value="">Select Cast Member...</option>
-                                                    {castLibrary.filter(m => {
-                                                        // Filter by language
-                                                        const langMatch = voiceSettings.language === 'Swedish'
-                                                            ? m.id.includes('-sv-')
-                                                            : !m.id.includes('-sv-');
-                                                        if (!langMatch) return false;
-                                                        
-                                                        // Filter by gender
-                                                        if (guestGenderFilter !== 'All') {
-                                                            return (m.gender || 'Female') === guestGenderFilter;
-                                                        }
-                                                        return true;
-                                                    }).map(member => (
-                                                        <option key={member.id} value={member.id}>
-                                                            {member.gender === 'Male' ? '♂' : '♀'} {member.name} ({member.voice} - {member.gender || 'Female'})
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <div className="text-[10px] font-bold text-app-dim uppercase">Display Name</div>
-                                                <input 
-                                                    type="text"
-                                                    value={voiceSettings.guestLabel || ''}
-                                                    onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, guestLabel: e.target.value })}
-                                                    placeholder="Rename Character..."
-                                                    className="bg-app-bg border border-app-border text-xs text-app-text rounded px-3 py-1.5 focus:outline-none w-full focus:border-amber-500 transition-colors"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {showBios && (
-                                        <div className="animate-fade-in">
-                                            <div className="text-[10px] font-bold text-app-dim uppercase mb-1">Bio / Vibe</div>
-                                            <textarea 
-                                                value={voiceSettings.guestBio || ''}
-                                                onChange={(e) => onUpdateVoiceSettings({ ...voiceSettings, guestBio: e.target.value })}
-                                                className="w-full bg-black/40 border border-app-border rounded-lg p-3 text-xs text-app-text focus:outline-none focus:border-amber-500 resize-none h-20 placeholder-white/20 shadow-inner"
-                                                placeholder="Describe personality..."
-                                            />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Preview / Action Area */}
-                <div className="flex flex-col gap-6">
-                    {/* Standalone Content Input Section */}
-                    <div className="bg-app-card rounded-xl border border-app-border p-5 text-left space-y-4 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-bold text-app-text flex items-center gap-2 uppercase tracking-wider">
-                                <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                                Podcast Content / Topic Input
-                            </h3>
-                            {hasActiveSession ? (
-                                <label className="flex items-center gap-2 cursor-pointer select-none">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={podcastIncludeSessionData} 
-                                        onChange={(e) => setPodcastIncludeSessionData(e.target.checked)}
-                                        className="rounded border-zinc-700 bg-zinc-900 text-purple-600 focus:ring-purple-500/50 h-4 w-4"
-                                    />
-                                    <span className="text-xs text-app-dim hover:text-app-text transition-colors">Include Session Data</span>
-                                </label>
-                            ) : (
-                                <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700">
-                                    Custom Input Only (No Session)
-                                </span>
-                            )}
-                        </div>
-
-                        <div className="space-y-1">
-                            <textarea
-                                value={podcastCustomInput}
-                                onChange={(e) => setPodcastCustomInput(e.target.value)}
-                                placeholder="What should the hosts discuss? Type a topic, list of questions, talking points, or copy-paste text here..."
-                                className="w-full bg-zinc-950/60 border border-app-border rounded-lg p-3 text-xs text-app-text focus:outline-none focus:border-purple-500/80 resize-none h-44 placeholder-white/20 shadow-inner"
-                            />
-                            <div className="flex justify-between items-center text-[10px] text-app-dim">
-                                <span>{podcastCustomInput.length} characters</span>
-                                <span>Session data use is optional</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="bg-app-bg rounded-xl border border-app-border p-6 flex flex-col items-center justify-center text-center">
-                        <div className="mb-4 p-3 rounded-full bg-purple-500/10 text-purple-400">
-                            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                            </svg>
-                        </div>
-                        <h3 className="text-lg font-bold text-app-text mb-1">{t('studio.readyToGenerate')}</h3>
-                        <p className="text-app-dim text-xs mb-6 max-w-xs">
-                            {t('studio.readyToGenerateDesc')}
-                        </p>
-                        
-                        <button 
-                            onClick={() => {
-                                if (!podcastCustomInput.trim() && (!hasActiveSession || !podcastIncludeSessionData)) {
-                                    alert("Please enter a custom topic/content or check 'Include Session Data' to provide source material for your podcast!");
-                                    return;
-                                }
-                                onRunTool(activeFormat, { 
-                                    isIndependent: true, 
-                                    includeSessionData: hasActiveSession && podcastIncludeSessionData, 
-                                    customInput: podcastCustomInput 
-                                });
-                            }}
-                            disabled={isLoading}
-                            className="w-full max-w-xs py-3.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
-                        >
-                            {isLoading ? (
-                                <>
-                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                    <span>{t('studio.generating')}</span>
-                                </>
-                            ) : (
-                                <>
-                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    <span>{t('studio.generatePodcast')}</span>
-                                </>
-                            )}
-                        </button>
-                        <p className="mt-4 text-[9px] text-app-dim max-w-xs leading-relaxed">
-                            {t('studio.generationNote')}
-                        </p>
-                    </div>
-                </div>
-              </div>
+              <PodcastCreator
+                  voiceSettings={voiceSettings}
+                  onUpdateVoiceSettings={onUpdateVoiceSettings}
+                  onRunTool={onRunTool}
+                  isLoading={isLoading}
+                  hasActiveSession={hasActiveSession}
+                  castLibrary={castLibrary}
+                  setIsCastLibraryOpen={setIsCastLibraryOpen}
+                  activeFormat={activeFormat}
+                  onSelectFormat={setActiveFormat}
+                  onOpenHistory={() => setShowHistory(true)}
+                  onOpenPrompts={() => setShowPrompts(true)}
+                  touchedRoles={touchedRoles}
+                  setTouchedRoles={setTouchedRoles}
+              />
             )}
 
             {activeTool === 'crypto_trading_assistant' && (

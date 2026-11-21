@@ -159,7 +159,7 @@ export const AICIConfluenceEngine: React.FC<AICIConfluenceEngineProps> = ({
   // Evaluated Signals using the actual Pine confluence formulas in TS
   const signalEngine = useMemo(() => {
     const len = candles.length;
-    if (len < 5) return { score: 0, type: 'NONE', sl: 0, tp1: 0, tp2: 0, isAlert: false };
+    if (len < 5) return { score: 0, type: 'NONE', entry: price, sl: 0, tp1: 0, tp2: 0, isAlert: false };
 
     // Get swing anchors
     let recentSwingHigh = candles[len - 3].high;

@@ -1,7 +1,19 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, doc, getDocFromServer } from "firebase/firestore";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import firebaseConfig from "../firebase-applet-config.json";
+
+// Firebase web config is injected via Vite env vars (VITE_FIREBASE_*).
+// The previous tracked copy was removed from git — see .env.example.
+const firebaseConfig = {
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+};
 
 let db: any = null;
 let auth: any = null;
@@ -62,7 +74,20 @@ export function setFirebaseAvailable(val: boolean) {
   isFirebaseAvailable = val;
 }
 
+const firebaseEnabled = Boolean(
+  firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.firestoreDatabaseId
+);
+
+if (!firebaseEnabled) {
+  console.warn(
+    "Firebase config missing (VITE_FIREBASE_* env vars). Falling back to local storage / IDB for all operations."
+  );
+  isFirebaseAvailable = false;
+  firebaseReadyPromise = Promise.resolve(false);
+}
+
 try {
+  if (!firebaseEnabled) throw new Error('Firebase config not configured');
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
   auth = getAuth(app);

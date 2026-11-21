@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
         allowedHosts: true,
         hmr: false,
+        ws: false,
         proxy: {
           '/ollama': {
             target: 'http://localhost:11434',

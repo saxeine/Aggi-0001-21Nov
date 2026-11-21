@@ -154,6 +154,10 @@ export const useThemeEngine = () => {
         if (savedSettings) {
             try {
                 const parsed = JSON.parse(savedSettings);
+                // Keys are never persisted: force session-only. A fresh visit
+                // starts with empty keys; the user re-enters them as needed.
+                parsed.geminiApiKey = '';
+                parsed.customApiKey = '';
                 if (
                   !parsed.model ||
                   parsed.model === 'gemini-3.8-flash' ||
@@ -184,7 +188,9 @@ export const useThemeEngine = () => {
     }, [theme]);
 
     useEffect(() => {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        // Strip secrets before persisting: keys live only in memory.
+        const { geminiApiKey, customApiKey, ...persistable } = settings;
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(persistable));
     }, [settings]);
 
     // Color Engine Effect
