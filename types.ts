@@ -17,6 +17,22 @@ export interface Message {
   isError?: boolean;
   groundingChunks?: any[]; // Array containing web source metadata
   category?: 'insight' | 'discovery' | 'structure' | 'custom';
+  citations?: Array<{
+    marker: number;
+    chunkId: string;
+    docId: string;
+    docName: string;
+    snippet: string;
+    score: number;
+  }>;
+  maggiMeta?: {
+    model?: string;
+    provider?: string;
+    routedVia?: string;
+    latencyMs?: number;
+    retrievalMs?: number;
+    chunkCount?: number;
+  };
 }
 
 export interface Session {
@@ -108,14 +124,17 @@ export interface ThemeSettings {
   showLabels: boolean;    // Toggle for icon text labels
   
   // AI Provider Settings
-  provider: 'gemini' | 'ollama' | 'custom';
+  provider: 'gemini' | 'ollama' | 'custom' | 'maggi';
   
   // Gemini Specific
-  model: string;          // 'gemini-3.8-flash' | 'gemini-4-argon' | 'gemini-3.1-flash-lite'
+  model: string;          // e.g. 'gemini-4-hydrogen' | 'gemini-4-neon' | 'gemini-4-argon' | 'gemini-4-carbon' | 'gemini-3.1-flash-lite'
   enableCaching: boolean; // Context Caching toggle
   autoTagSources?: boolean; // Auto-tag uploaded sources
   geminiApiKey?: string;  // Custom Gemini API Key
   
+  // MAGGI Specific
+  maggiAutoIndexSession?: boolean;
+
   // Ollama Specific
   ollamaEndpoint: string;
   ollamaModel: string;

@@ -4,6 +4,9 @@ import { Session, Message, MediaItem, ThemeSettings } from '../types';
 import { generateResponse as generateGeminiResponse, generateSuggestions as generateGeminiSuggestions, updateCache, generateMindMapJson, generateTagsForMedia } from '../services/gemini';
 import { generateOllamaResponse, generateOllamaSuggestions, OllamaError } from '../services/ollama';
 import { generateCustomAIResponse, generateCustomAISuggestions } from '../services/customAi';
+import { getMaggiStore } from '../services/maggi/store';
+import { createBrain } from '../services/maggi/brain';
+import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
 
 const getFriendlyErrorMessage = (err: any): string => {
   if (err instanceof OllamaError) {
@@ -90,7 +93,57 @@ export const useAI = (
         setIsSuggestionsLoading(true);
         try {
           let qs: string[] = [];
-          if (settings.provider === 'ollama') {
+          if (settings.provider === 'maggi') {
+             const store = getMaggiStore();
+             await store.hydrate();
+             if (settings.maggiAutoIndexSession !== false) {
+               try {
+                 await store.ingestMediaItems(items.map((it) => ({
+                   id: it.id,
+                   name: it.name,
+                   type: it.type,
+                   mimeType: it.mimeType,
+                   data: it.data,
+                 })));
+               } catch {
+                 /* non-fatal during suggestion generation */
+               }
+             }
+             const brain = createBrain(store.getSettings());
+             const sourceNames = items.map((i) => `- ${i.name} (${i.type})`).join('\n');
+             try {
+               const completion = await brain.complete([
+                 {
+                   role: 'system',
+                   content: 'Generate 4 concise, high-value analytical questions about these workspace sources. Return only a JSON array of 4 strings.',
+                 },
+                 {
+                   role: 'user',
+                   content: `Workspace sources:\n${sourceNames}`,
+                 },
+               ]);
+               const match = completion.text.match(/\[[\s\S]*\]/);
+               if (match) {
+                 const parsed = JSON.parse(match[0]);
+                 if (Array.isArray(parsed)) {
+                   qs = parsed.map((x) => String(x)).filter(Boolean).slice(0, 4);
+                 }
+               }
+               if (!qs.length) {
+                 qs = completion.text
+                   .split('\n')
+                   .map((line) => line.replace(/^[-*\d.)\s"]+/, '').replace(/",?$/, '').trim())
+                   .filter((l) => l.length > 8)
+                   .slice(0, 4);
+               }
+             } catch {
+               qs = [
+                 'Summarise the key insights across all selected sources.',
+                 'What facts, dates, or figures stand out most?',
+                 'Identify potential risks or open questions in these sources.',
+               ];
+             }
+          } else if (settings.provider === 'ollama') {
              if (!settings.ollamaModel) {
                  qs = ["Please select an Ollama model in settings."];
              } else {
@@ -105,7 +158,7 @@ export const useAI = (
                  items
              );
           } else {
-             const model = settings.model || 'gemini-3.8-flash';
+             const model = settings.model || DEFAULT_GEMINI_MODEL;
              qs = await generateGeminiSuggestions(items, model);
           }
           updateSessionById(sessionId, s => ({ ...s, suggestions: qs }));
@@ -114,12 +167,12 @@ export const useAI = (
         } finally {
           setIsSuggestionsLoading(false);
         }
-    }, [settings.provider, settings.model, settings.ollamaEndpoint, settings.ollamaModel, settings.customBaseUrl, settings.customApiKey, settings.customModelName, settings.customApiPath, updateSessionById]);
+    }, [settings.provider, settings.model, settings.maggiAutoIndexSession, settings.ollamaEndpoint, settings.ollamaModel, settings.customBaseUrl, settings.customApiKey, settings.customModelName, settings.customApiPath, updateSessionById]);
 
     const autoTagMediaItems = useCallback(async (sessionId: string, items: MediaItem[]) => {
         if (items.length === 0 || settings.provider !== 'gemini') return;
         
-        const model = settings.model || 'gemini-3.8-flash';
+        const model = settings.model || DEFAULT_GEMINI_MODEL;
         
         for (const item of items) {
             // Already tagged or empty
@@ -170,7 +223,129 @@ export const useAI = (
           let responseText = "";
           let groundingChunks = undefined;
     
-          if (settings.provider === 'ollama') {
+          if (settings.provider === 'maggi') {
+            const store = getMaggiStore();
+            await store.hydrate();
+
+            if (settings.maggiAutoIndexSession !== false && activeMediaItems.length > 0) {
+              await store.ingestMediaItems(
+                activeMediaItems.map((it) => ({
+                  id: it.id,
+                  name: it.name,
+                  type: it.type,
+                  mimeType: it.mimeType,
+                  data: it.data,
+                })),
+              );
+            }
+
+            const modelMsgId = (Date.now() + 1).toString();
+            const placeholderMsg: Message = {
+              id: modelMsgId,
+              role: 'model',
+              content: '',
+              timestamp: new Date(),
+              category,
+            };
+            updateActiveSession(s => ({ ...s, history: [...s.history, placeholderMsg] }));
+
+            const priorHistory = activeSession.history
+              .filter((m) => !m.isError && m.content.trim())
+              .map((m) => ({
+                role: (m.role === 'model' ? 'assistant' : 'user') as 'user' | 'assistant',
+                content: m.content,
+              }));
+
+            if (store.stats().chunks > 0) {
+              const result = await store.ask(userMsg.content, priorHistory, {
+                useStreaming: true,
+                onDelta: (delta) => {
+                  responseText += delta;
+                  updateActiveSession(s => ({
+                    ...s,
+                    history: s.history.map(m => m.id === modelMsgId ? { ...m, content: responseText } : m),
+                  }));
+                },
+              });
+
+              responseText = result.answer;
+              const maggiMeta = {
+                model: result.usage?.model,
+                provider: result.usage?.provider,
+                routedVia: result.usage?.routedVia,
+                retrievalMs: result.retrieval.latencyMs,
+                chunkCount: result.retrieval.chunks.length,
+              };
+
+              updateActiveSession(s => ({
+                ...s,
+                history: s.history.map(m => m.id === modelMsgId
+                  ? {
+                    ...m,
+                    content: result.answer,
+                    citations: result.citations,
+                    maggiMeta,
+                  }
+                  : m),
+              }));
+
+              const existingChat = store.getChatMessages();
+              await store.saveChatMessages([
+                ...existingChat,
+                { id: userMsg.id, role: 'user', content: userMsg.content, timestamp: Date.now() },
+                {
+                  id: modelMsgId,
+                  role: 'assistant',
+                  content: result.answer,
+                  timestamp: Date.now(),
+                  citations: result.citations,
+                  retrieval: result.retrieval,
+                  usage: result.usage,
+                },
+              ]);
+            } else {
+              // No indexed text chunks available — route cleanly through MAGGI's configured brain directly
+              const brain = createBrain(store.getSettings());
+              const completion = await brain.stream(
+                [
+                  ...priorHistory.slice(-6),
+                  { role: 'user', content: userMsg.content },
+                ],
+                { temperature: store.getSettings().temperature },
+                (delta) => {
+                  responseText += delta;
+                  updateActiveSession(s => ({
+                    ...s,
+                    history: s.history.map(m => m.id === modelMsgId ? { ...m, content: responseText } : m),
+                  }));
+                },
+              );
+              responseText = completion.text;
+              updateActiveSession(s => ({
+                ...s,
+                history: s.history.map(m => m.id === modelMsgId
+                  ? {
+                    ...m,
+                    content: completion.text,
+                    maggiMeta: {
+                      model: completion.model,
+                      provider: completion.provider,
+                      routedVia: completion.routedVia,
+                      chunkCount: 0,
+                    },
+                  }
+                  : m),
+              }));
+            }
+
+            if (onAutoPreview && responseText.includes('leaflet.js') && responseText.includes('<!DOCTYPE html>')) {
+              const codeMatch = responseText.match(/```html\s*([\s\S]*?)\s*```/) || responseText.match(/```\s*([\s\S]*?)\s*```/);
+              if (codeMatch && codeMatch[1]) {
+                onAutoPreview(codeMatch[1]);
+              }
+            }
+            return;
+          } else if (settings.provider === 'ollama') {
             if (!settings.ollamaModel) {
                 responseText = "Please select an Ollama model in settings.";
             } else {
@@ -215,7 +390,7 @@ export const useAI = (
             );
             responseText = result.text;
           } else {
-            const model = settings.model || 'gemini-3.8-flash';
+            const model = settings.model || DEFAULT_GEMINI_MODEL;
             
             let cachedContentName = undefined;
             if (settings.enableCaching && activeMediaItems.length > 0) {
@@ -292,7 +467,7 @@ export const useAI = (
             );
             
             // Only support Gemini for MindMap currently due to JSON structure requirements
-            const model = settings.model || 'gemini-3.8-flash';
+            const model = settings.model || DEFAULT_GEMINI_MODEL;
             const graph = await generateMindMapJson(activeMediaItems, model);
             
             if (graph) {
@@ -318,3 +493,4 @@ export const useAI = (
         isMindMapLoading
     };
 };
+

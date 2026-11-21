@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MaggiChatMessage } from '../../hooks/useMaggi';
-import { RetrievedContext } from '../../services/maggi/types';
+import { RetrievedContext, SavedMaggiQuery } from '../../services/maggi/types';
 
 interface Props {
   messages: MaggiChatMessage[];
@@ -11,10 +11,14 @@ interface Props {
   stats: { documents: number; chunks: number };
   backendLabel: string;
   providerLabel: string;
+  savedQueries?: SavedMaggiQuery[];
   onAsk: (q: string, streaming: boolean) => void;
   onStop: () => void;
   onClear: () => void;
   onOpenSettings: () => void;
+  onOpenSaved?: () => void;
+  onSaveMessage?: (assistantMsgId: string) => void | Promise<unknown>;
+  onSaveLatest?: () => void | Promise<unknown>;
   onJumpToSource: (chunkId: string, docId: string) => void;
 }
 
@@ -87,14 +91,19 @@ const MaggiChat: React.FC<Props> = ({
   stats,
   backendLabel,
   providerLabel,
+  savedQueries = [],
   onAsk,
   onStop,
   onClear,
   onOpenSettings,
+  onOpenSaved,
+  onSaveMessage,
+  onSaveLatest,
   onJumpToSource,
 }) => {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(true);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -108,6 +117,10 @@ const MaggiChat: React.FC<Props> = ({
     setInput('');
   };
 
+  const hasSaveableAnswer = messages.some(
+    (m) => m.role === 'assistant' && !m.error && !m.isStreaming && m.content.trim().length > 0,
+  );
+
   return (
     <div className="flex h-full flex-col">
       {/* header */}
@@ -115,7 +128,7 @@ const MaggiChat: React.FC<Props> = ({
         <span className="text-[11px] font-bold text-app-text">{providerLabel}</span>
         <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold text-emerald-400">{backendLabel}</span>
         <span className="text-[9px] text-app-dim">{stats.documents} docs · {stats.chunks} chunks</span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
             onClick={() => setStreaming((v) => !v)}
             className={`rounded-full px-2 py-0.5 text-[9px] font-bold transition-colors ${streaming ? 'bg-app-text text-app-bg' : 'bg-app-panel text-app-dim'}`}
@@ -123,6 +136,24 @@ const MaggiChat: React.FC<Props> = ({
           >
             ⚡ Stream {streaming ? 'on' : 'off'}
           </button>
+          {onOpenSaved && (
+            <button
+              onClick={onOpenSaved}
+              className="rounded-lg border border-app-border px-2 py-0.5 text-[10px] font-bold text-app-dim hover:border-emerald-400/40 hover:text-emerald-400 transition-colors"
+              title="View saved queries"
+            >
+              🔖 Saved ({savedQueries.length})
+            </button>
+          )}
+          {hasSaveableAnswer && onSaveLatest && (
+            <button
+              onClick={() => onSaveLatest()}
+              className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+              title="Save the latest query & answer"
+            >
+              💾 Save Latest
+            </button>
+          )}
           <button onClick={onOpenSettings} className="text-[10px] font-bold text-app-dim hover:text-app-text">⚙︎ Settings</button>
           {messages.length > 0 && (
             <button onClick={onClear} className="text-[10px] font-bold text-app-dim hover:text-red-400">Clear chat</button>
@@ -157,60 +188,101 @@ const MaggiChat: React.FC<Props> = ({
           </div>
         )}
 
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {msg.role === 'assistant' && (
-              <div className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-[11px]">🧠</div>
-            )}
-            <div className={`min-w-0 ${msg.role === 'user' ? 'max-w-[85%]' : 'max-w-full flex-1'}`}>
-              {msg.role === 'user' ? (
-                <div className="rounded-2xl rounded-tr-sm bg-app-text px-3 py-2 text-xs leading-relaxed text-app-bg">
-                  {msg.content}
-                </div>
-              ) : (
-                <div className={`rounded-xl border px-3 py-2 ${msg.error ? 'border-red-500/40 bg-red-500/5' : 'border-app-border bg-app-panel/50'}`}>
-                  <div className="prose prose-sm prose-invert max-w-none text-xs leading-relaxed text-app-text [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_li]:my-0.5 [&_code]:rounded [&_code]:bg-app-bg [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[11px] [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-3 [&_table]:text-[10px]">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {msg.content || (msg.isStreaming ? '▍' : '')}
-                    </ReactMarkdown>
-                  </div>
+        {messages.map((msg) => {
+          const isSaved =
+            msg.role === 'assistant' &&
+            !msg.error &&
+            msg.content.trim().length > 0 &&
+            savedQueries.some((q) => q.answer.trim() === msg.content.trim());
 
-                  {msg.isStreaming && msg.content && <span className="inline-block animate-pulse text-emerald-400">▍</span>}
-
-                  {/* citations */}
-                  {!!msg.citations?.length && (
-                    <div className="mt-2 space-y-1 border-t border-app-border pt-2">
-                      <div className="text-[9px] font-bold uppercase tracking-wide text-app-dim">Sources</div>
-                      {msg.citations.map((c) => (
-                        <button
-                          key={c.marker}
-                          onClick={() => onJumpToSource(c.chunkId, c.docId)}
-                          className="flex w-full gap-1.5 rounded-lg bg-app-bg/60 p-1.5 text-left hover:bg-app-bg"
-                        >
-                          <span className="mt-0.5 rounded bg-emerald-400/15 px-1 py-0.5 text-[9px] font-bold text-emerald-400">[{c.marker}]</span>
-                          <span className="min-w-0">
-                            <span className="block truncate text-[10px] font-semibold text-app-text">{c.docName}</span>
-                            <span className="block line-clamp-1 text-[9px] text-app-dim">{c.snippet}</span>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {msg.retrieval && <RetrievalInspector ctx={msg.retrieval} onJump={onJumpToSource} />}
-
-                  {msg.usage && (
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[9px] text-app-dim">
-                      <span>{msg.usage.model}</span>
-                      {msg.usage.routedVia && <span className="rounded bg-app-bg px-1 py-0.5 text-emerald-400/80">via {msg.usage.routedVia}</span>}
-                      {msg.usage.promptTokens ? <span>{msg.usage.promptTokens}→{msg.usage.completionTokens} tok</span> : null}
-                    </div>
-                  )}
-                </div>
+          return (
+            <div key={msg.id} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {msg.role === 'assistant' && (
+                <div className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-[11px]">🧠</div>
               )}
+              <div className={`min-w-0 ${msg.role === 'user' ? 'max-w-[85%]' : 'max-w-full flex-1'}`}>
+                {msg.role === 'user' ? (
+                  <div className="rounded-2xl rounded-tr-sm bg-app-text px-3 py-2 text-xs leading-relaxed text-app-bg">
+                    {msg.content}
+                  </div>
+                ) : (
+                  <div className={`rounded-xl border px-3 py-2 ${msg.error ? 'border-red-500/40 bg-red-500/5' : 'border-app-border bg-app-panel/50'}`}>
+                    <div className="prose prose-sm prose-invert max-w-none text-xs leading-relaxed text-app-text [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_li]:my-0.5 [&_code]:rounded [&_code]:bg-app-bg [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[11px] [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-3 [&_table]:text-[10px]">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {msg.content || (msg.isStreaming ? '▍' : '')}
+                      </ReactMarkdown>
+                    </div>
+
+                    {msg.isStreaming && msg.content && <span className="inline-block animate-pulse text-emerald-400">▍</span>}
+
+                    {/* citations */}
+                    {!!msg.citations?.length && (
+                      <div className="mt-2 space-y-1 border-t border-app-border pt-2">
+                        <div className="text-[9px] font-bold uppercase tracking-wide text-app-dim">Sources</div>
+                        {msg.citations.map((c) => (
+                          <button
+                            key={c.marker}
+                            onClick={() => onJumpToSource(c.chunkId, c.docId)}
+                            className="flex w-full gap-1.5 rounded-lg bg-app-bg/60 p-1.5 text-left hover:bg-app-bg"
+                          >
+                            <span className="mt-0.5 rounded bg-emerald-400/15 px-1 py-0.5 text-[9px] font-bold text-emerald-400">[{c.marker}]</span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-[10px] font-semibold text-app-text">{c.docName}</span>
+                              <span className="block line-clamp-1 text-[9px] text-app-dim">{c.snippet}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {msg.retrieval && <RetrievalInspector ctx={msg.retrieval} onJump={onJumpToSource} />}
+
+                    {!msg.isStreaming && (msg.usage || (!msg.error && msg.content.trim())) && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-app-border/50 pt-1.5 text-[9px] text-app-dim">
+                        {msg.usage?.model && <span>{msg.usage.model}</span>}
+                        {msg.usage?.routedVia && (
+                          <span className="rounded bg-app-bg px-1 py-0.5 text-emerald-400/80">via {msg.usage.routedVia}</span>
+                        )}
+                        {msg.usage?.promptTokens ? (
+                          <span>{msg.usage.promptTokens}→{msg.usage.completionTokens} tok</span>
+                        ) : null}
+
+                        <div className="ml-auto flex items-center gap-1.5">
+                          {msg.content.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(msg.content);
+                                setCopiedId(msg.id);
+                                window.setTimeout(() => setCopiedId((prev) => (prev === msg.id ? null : prev)), 1800);
+                              }}
+                              className="rounded border border-app-border bg-app-bg px-1.5 py-0.5 font-bold text-app-dim hover:text-app-text"
+                            >
+                              {copiedId === msg.id ? '✓ Copied' : 'Copy'}
+                            </button>
+                          )}
+                          {onSaveMessage && !msg.error && msg.content.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => onSaveMessage(msg.id)}
+                              className={`rounded border px-2 py-0.5 font-bold transition-colors ${
+                                isSaved
+                                  ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400'
+                                  : 'border-app-border bg-app-bg text-app-text hover:border-emerald-400/50 hover:text-emerald-400'
+                              }`}
+                            >
+                              {isSaved ? '✓ Saved Query' : '🔖 Save Query'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={endRef} />
       </div>
 
@@ -246,7 +318,7 @@ const MaggiChat: React.FC<Props> = ({
           )}
         </div>
         <div className="mt-1 px-1 text-[9px] text-app-dim">
-          Grounded answers with inline citations · retrieval runs locally in your browser
+          Grounded answers with inline citations · history and saved queries persist locally &amp; sync cleanly
         </div>
       </div>
     </div>
@@ -254,3 +326,4 @@ const MaggiChat: React.FC<Props> = ({
 };
 
 export default MaggiChat;
+

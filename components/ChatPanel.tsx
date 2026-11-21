@@ -40,6 +40,7 @@ interface ChatPanelProps {
   onDownloadSession?: () => void;
   onEditMessage?: (id: string, newContent: string) => void;
   onOpenSettings?: () => void;
+  onSaveToMaggi?: (msg: Message, queryText: string) => Promise<void> | void;
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({ 
@@ -74,12 +75,14 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   onUpdateDescription,
   onDownloadSession,
   onEditMessage,
-  onOpenSettings
+  onOpenSettings,
+  onSaveToMaggi
 }) => {
   const { t } = useLanguage();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [activeMenu, setActiveMenu] = useState<'insight' | 'discovery' | 'structure' | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [savedMaggiMessageIds, setSavedMaggiMessageIds] = useState<Record<string, boolean>>({});
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
@@ -297,6 +300,17 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     const isColored = msg.role === 'model' && !!msg.category;
     const actionBaseClass = isColored ? 'text-white/60 hover:text-white' : 'text-app-dim hover:text-app-text';
     const activeActionClass = isColored ? 'text-white animate-pulse' : 'text-app-text animate-pulse';
+
+    let precedingQuery = '';
+    if (msg.role === 'model') {
+      for (let i = index - 1; i >= 0; i--) {
+        if (history[i]?.role === 'user') {
+          precedingQuery = history[i].content;
+          break;
+        }
+      }
+    }
+
     return (
     <div className={`flex flex-col mb-6 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
          <div className={`relative max-w-[95%] md:max-w-[85%] rounded-2xl px-5 py-3 text-sm leading-relaxed shadow-sm group ${getBubbleStyles(msg)}`}>
@@ -307,6 +321,31 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
               </div>
           )}
           <div className="break-words font-sans">{parseContent(msg.content)}</div>
+          {msg.citations && msg.citations.length > 0 && (
+            <div className={`mt-3 pt-3 border-t ${isColored ? 'border-white/30' : 'border-app-border/50'} space-y-1.5`}>
+              <p className="text-[10px] font-bold opacity-80 uppercase tracking-wider text-emerald-400">MAGGI Grounded Citations:</p>
+              <div className="space-y-1">
+                {msg.citations.map((c) => (
+                  <div key={c.marker} className="rounded-lg bg-black/20 border border-app-border/40 px-2.5 py-1.5 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="rounded bg-emerald-500/20 px-1 py-0.5 text-[10px] font-bold text-emerald-300">[{c.marker}]</span>
+                      <span className="font-semibold text-app-text truncate">{c.docName}</span>
+                    </div>
+                    <p className="mt-0.5 line-clamp-2 text-[11px] opacity-75">{c.snippet}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {msg.maggiMeta && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] opacity-75">
+              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-bold text-emerald-400">🧠 MAGGI</span>
+              {msg.maggiMeta.model && <span>{msg.maggiMeta.model}</span>}
+              {msg.maggiMeta.routedVia && <span>· via {msg.maggiMeta.routedVia}</span>}
+              {typeof msg.maggiMeta.chunkCount === 'number' && <span>· {msg.maggiMeta.chunkCount} passages</span>}
+              {typeof msg.maggiMeta.retrievalMs === 'number' && <span>· {msg.maggiMeta.retrievalMs}ms</span>}
+            </div>
+          )}
           {msg.groundingChunks && msg.groundingChunks.length > 0 && (
             <div className={`mt-3 pt-3 border-t ${isColored ? 'border-white/30' : 'border-app-border/50'}`}>
               <p className="text-xs font-bold opacity-70 mb-1 uppercase tracking-wider">{t('chat.sources')}:</p>
@@ -353,11 +392,27 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
             </div>
           )}
           {msg.role === 'model' && !msg.isError && (
-            <div className={`mt-2 pt-2 border-t ${isColored ? 'border-white/20' : 'border-app-border/30'} flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity`}>
+            <div className={`mt-2 pt-2 border-t ${isColored ? 'border-white/20' : 'border-app-border/30'} flex flex-wrap justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity`}>
               <button onClick={() => toggleSpeaking(msg.content, msg.id)} className={`flex items-center gap-1 text-xs transition-colors ${speakingMessageId === msg.id ? activeActionClass : actionBaseClass}`} title={t('chat.readAloud')}><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.414z" clipRule="evenodd" /></svg></button>
               <button onClick={() => handleCopyMessage(msg.content, msg.id)} className={`flex items-center gap-1 text-xs transition-colors ${actionBaseClass}`} title={t('chat.copy')}>{copiedMessageId === msg.id ? <span className={`${isColored ? 'text-white' : 'text-app-text'} font-bold animate-pulse`}>{t('chat.copied')}</span> : <>{t('chat.copy')}</>}</button>
               <button onClick={() => { setEditingMessageId(msg.id); setEditingContent(msg.content); }} className={`flex items-center gap-1 text-xs transition-colors ${actionBaseClass}`} title="Edit"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>Edit</button>
               <button onClick={() => onSaveAsSource(msg.content)} className={`flex items-center gap-1 text-xs transition-colors ${isColored ? 'text-white/60 hover:text-white' : 'text-app-dim hover:text-green-400'}`} title={t('chat.addSource')}><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>{t('chat.source')}</button>
+              {onSaveToMaggi && msg.content.trim() && (
+                <button
+                  onClick={async () => {
+                    await onSaveToMaggi(msg, precedingQuery || 'Workspace Query');
+                    setSavedMaggiMessageIds((prev) => ({ ...prev, [msg.id]: true }));
+                  }}
+                  className={`flex items-center gap-1 text-xs transition-colors font-semibold ${
+                    savedMaggiMessageIds[msg.id]
+                      ? 'text-emerald-400'
+                      : (isColored ? 'text-white/70 hover:text-emerald-300' : 'text-app-dim hover:text-emerald-400')
+                  }`}
+                  title="Save this query and answer into MAGGI Saved Queries"
+                >
+                  {savedMaggiMessageIds[msg.id] ? '✓ Saved to MAGGI' : '🔖 Save to MAGGI'}
+                </button>
+              )}
               {msg.category && (
                 <div className="relative">
                   <button onClick={() => setDownloadMenuId(downloadMenuId === msg.id ? null : msg.id)} className={`flex items-center gap-1 text-xs transition-colors ${actionBaseClass}`} title="Download">

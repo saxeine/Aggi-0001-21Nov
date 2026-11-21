@@ -7,13 +7,28 @@
 
 export const MAGGI_SETTINGS_KEY = 'maggi_rag_settings_v1';
 export const MAGGI_INDEX_KEY = 'maggi_rag_index_v1';
+export const MAGGI_CHAT_KEY = 'maggi_rag_chat_v1';
+export const MAGGI_SAVED_QUERIES_KEY = 'maggi_rag_saved_queries_v1';
+export const MAGGI_USAGE_KEY = 'maggi_rag_usage_v1';
 
 export type MaggiProvider = 'freellmapi' | 'gemini' | 'openai-compatible' | 'ollama';
+
+export interface FreeLlmKeyEntry {
+  platform: string;
+  key: string;
+  label?: string;
+  baseUrl?: string;
+  enabled?: boolean;
+}
 
 export interface MaggiSettings {
   // --- Brain -------------------------------------------------------------
   provider: MaggiProvider;
 
+  /** 'url' connects to a FreeLLMAPI proxy; 'keypool' uses imported provider keys directly on the server. */
+  freeLlmMode: 'url' | 'keypool';
+  /** Imported FreeLLMAPI keys (from freellmapi-keys.json export or manual entry). */
+  freeLlmKeys: FreeLlmKeyEntry[];
   /** FreeLLMAPI base URL, e.g. http://localhost:3001/v1 */
   freeLlmApiBaseUrl: string;
   /** FreeLLMAPI unified key (`freellmapi-...`). Kept server-side when env is used. */
@@ -71,11 +86,13 @@ export interface MaggiSettings {
 export const DEFAULT_MAGGI_SETTINGS: MaggiSettings = {
   provider: 'freellmapi',
 
+  freeLlmMode: 'url',
+  freeLlmKeys: [],
   freeLlmApiBaseUrl: 'http://localhost:3001/v1',
   freeLlmApiKey: '',
   freeLlmApiModel: 'auto',
 
-  geminiModel: 'gemini-3.8-flash',
+  geminiModel: 'gemini-4-hydrogen',
 
   openAiBaseUrl: 'https://api.openai.com/v1',
   openAiApiKey: '',

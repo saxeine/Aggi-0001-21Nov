@@ -47,10 +47,11 @@ const DEFAULT_SETTINGS: ThemeSettings = {
   textSize: 100,
   showLabels: true,
   provider: 'gemini',
-  model: 'gemini-3.8-flash',
+  model: 'gemini-4-hydrogen',
   enableCaching: false,
   geminiApiKey: '',
-  ollamaEndpoint: 'https://than-conflict-caught-asthma.trycloudflare.com',
+  maggiAutoIndexSession: true,
+  ollamaEndpoint: 'http://localhost:11434',
   ollamaModel: '',
   customBaseUrl: 'https://api.openai.com',
   customApiKey: '',
@@ -153,8 +154,21 @@ export const useThemeEngine = () => {
         if (savedSettings) {
             try {
                 const parsed = JSON.parse(savedSettings);
-                if (!parsed.model || parsed.model === 'gemini-3.5-flash' || parsed.model === 'gemini-2.5-flash' || parsed.model.startsWith('gemini-2.') || parsed.model.startsWith('gemini-1.')) {
-                    parsed.model = 'gemini-3.8-flash';
+                if (
+                  !parsed.model ||
+                  parsed.model === 'gemini-3.8-flash' ||
+                  parsed.model === 'gemini-3.5-flash' ||
+                  parsed.model === 'gemini-2.5-flash' ||
+                  parsed.model.startsWith('gemini-2.0-') ||
+                  parsed.model.startsWith('gemini-1.')
+                ) {
+                    parsed.model = 'gemini-4-hydrogen';
+                }
+                if (
+                  !parsed.ollamaEndpoint ||
+                  parsed.ollamaEndpoint === 'https://than-conflict-caught-asthma.trycloudflare.com'
+                ) {
+                    parsed.ollamaEndpoint = 'http://localhost:11434';
                 }
                 setSettings({ ...DEFAULT_SETTINGS, ...parsed });
             } catch (e) {

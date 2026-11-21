@@ -1,6 +1,9 @@
 import { generateResponse as generateGeminiResponse } from './gemini';
 import { generateOllamaResponse } from './ollama';
 import { generateCustomAIResponse } from './customAi';
+import { getMaggiStore } from './maggi/store';
+import { createBrain } from './maggi/brain';
+import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
 import { MediaItem } from '../types';
 
 export const generateUnifiedAIResponse = async (prompt: string, mediaItems: MediaItem[] = []): Promise<string> => {
@@ -8,7 +11,28 @@ export const generateUnifiedAIResponse = async (prompt: string, mediaItems: Medi
     const saved = localStorage.getItem('gemini_media_aggregator_settings');
     if (saved) {
       const settings = JSON.parse(saved);
-      if (settings.provider === 'ollama') {
+      if (settings.provider === 'maggi') {
+        const store = getMaggiStore();
+        await store.hydrate();
+        if (settings.maggiAutoIndexSession !== false && mediaItems.length > 0) {
+          await store.ingestMediaItems(
+            mediaItems.map((it) => ({
+              id: it.id,
+              name: it.name,
+              type: it.type,
+              mimeType: it.mimeType,
+              data: it.data,
+            })),
+          );
+        }
+        if (store.stats().chunks > 0) {
+          const result = await store.ask(prompt, [], { useStreaming: false });
+          return result.answer;
+        }
+        const brain = createBrain(store.getSettings());
+        const completion = await brain.complete([{ role: 'user', content: prompt }]);
+        return completion.text;
+      } else if (settings.provider === 'ollama') {
         let fullText = "";
         const generator = generateOllamaResponse(
           settings.ollamaEndpoint || 'http://localhost:11434',
@@ -33,16 +57,17 @@ export const generateUnifiedAIResponse = async (prompt: string, mediaItems: Medi
         );
         return result.text;
       } else {
-        const model = settings.model || 'gemini-3.8-flash';
+        const model = settings.model || DEFAULT_GEMINI_MODEL;
         const result = await generateGeminiResponse(prompt, [], mediaItems, model);
         return result.text;
       }
     }
   } catch (e) {
-    console.warn("Unified AI response custom/ollama failed, falling back to Gemini:", e);
+    console.warn("Unified AI response custom/ollama/maggi failed, falling back to Gemini:", e);
   }
 
   // Fallback to default Gemini
-  const response = await generateGeminiResponse(prompt, [], mediaItems, 'gemini-3.8-flash');
+  const response = await generateGeminiResponse(prompt, [], mediaItems, DEFAULT_GEMINI_MODEL);
   return response.text;
 };
+

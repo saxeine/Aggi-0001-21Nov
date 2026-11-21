@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { MaggiSettings as Settings, PROVIDER_LABELS, DEFAULT_MAGGI_SETTINGS } from '../../maggi/config';
+import React, { useRef, useState } from 'react';
+import { MaggiSettings as Settings, FreeLlmKeyEntry, PROVIDER_LABELS } from '../../maggi/config';
 import { createBrain } from '../../services/maggi/brain';
+import GeminiModelDrawer from '../GeminiModelDrawer';
 
 interface Props {
   settings: Settings;
@@ -49,10 +50,80 @@ const SECTION_LABELS: Record<Section, string> = {
   answer: '💬 Answering',
 };
 
+const maskKey = (k: string): string => {
+  const s = (k || '').trim();
+  if (s.length <= 10) return '••••••••';
+  return `${s.slice(0, 6)}••••${s.slice(-4)}`;
+};
+
+const parseFreeLlmKeysPayload = (rawText: string): FreeLlmKeyEntry[] => {
+  const parsed = JSON.parse(rawText);
+  const rawList = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.keys) ? parsed.keys : []);
+  if (!Array.isArray(rawList)) throw new Error('Expected a JSON object with a "keys" array.');
+  const cleaned: FreeLlmKeyEntry[] = [];
+  for (const item of rawList) {
+    if (!item || typeof item.platform !== 'string' || typeof item.key !== 'string') continue;
+    const platform = item.platform.trim().toLowerCase();
+    const key = item.key.trim();
+    if (!platform || !key) continue;
+    cleaned.push({
+      platform,
+      key,
+      ...(item.label ? { label: String(item.label).trim() } : {}),
+      ...(item.baseUrl ? { baseUrl: String(item.baseUrl).replace(/\s+/g, '') } : {}),
+      enabled: item.enabled !== false,
+    });
+  }
+  if (!cleaned.length) throw new Error('No valid { platform, key } entries found in JSON.');
+  return cleaned;
+};
+
 const MaggiSettingsPanel: React.FC<Props> = ({ settings, onChange, onReset }) => {
   const [section, setSection] = useState<Section>('brain');
   const [probe, setProbe] = useState<{ ok: boolean; detail: string; models?: string[] } | null>(null);
   const [probing, setProbing] = useState(false);
+  const [showJsonPaste, setShowJsonPaste] = useState(false);
+  const [jsonInput, setJsonInput] = useState('');
+  const [importStatus, setImportStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const keyFileInputRef = useRef<HTMLInputElement>(null);
+
+  const importKeysFromText = (rawText: string) => {
+    try {
+      const entries = parseFreeLlmKeysPayload(rawText);
+      onChange({
+        provider: 'freellmapi',
+        freeLlmMode: 'keypool',
+        freeLlmKeys: entries,
+      });
+      const platforms = Array.from(new Set(entries.map((e) => e.platform))).join(', ');
+      setImportStatus({ ok: true, text: `Imported ${entries.length} keys (${platforms}). Click "Test connection" below.` });
+      setJsonInput('');
+      setShowJsonPaste(false);
+      setProbe(null);
+    } catch (err: any) {
+      setImportStatus({ ok: false, text: err?.message || 'Failed to parse FreeLLMAPI keys JSON.' });
+    }
+  };
+
+  const handleKeyFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const text = await file.text();
+    importKeysFromText(text);
+  };
+
+  const toggleKeyEnabled = (index: number) => {
+    const next = (settings.freeLlmKeys || []).map((entry, idx) =>
+      idx === index ? { ...entry, enabled: entry.enabled === false } : entry,
+    );
+    onChange({ freeLlmKeys: next });
+  };
+
+  const removeKeyEntry = (index: number) => {
+    const next = (settings.freeLlmKeys || []).filter((_, idx) => idx !== index);
+    onChange({ freeLlmKeys: next });
+  };
 
   const runProbe = async () => {
     setProbing(true);
@@ -103,63 +174,219 @@ const MaggiSettingsPanel: React.FC<Props> = ({ settings, onChange, onReset }) =>
 
           {settings.provider === 'freellmapi' && (
             <div className="space-y-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3">
-              <div className="text-[11px] font-bold text-emerald-400">FreeLLMAPI · OpenAI-compatible proxy</div>
-              <Field label="Base URL" hint="Self-hosted default is http://localhost:3001/v1. Leave the key empty to use anonymous providers.">
-                <TextInput
-                  value={settings.freeLlmApiBaseUrl}
-                  onChange={(e) => onChange({ freeLlmApiBaseUrl: e.target.value })}
-                  placeholder="http://localhost:3001/v1"
-                />
-              </Field>
-              <Field label="Unified API key" hint="The freellmapi-… key from the FreeLLMAPI Keys page. Sent only to your own /api/maggi proxy.">
-                <TextInput
-                  type="password"
-                  value={settings.freeLlmApiKey}
-                  onChange={(e) => onChange({ freeLlmApiKey: e.target.value })}
-                  placeholder="freellmapi-••••••••"
-                />
-              </Field>
-              <Field label="Model" hint={'“auto” lets the router pick. Try auto:fast, auto:smart, or a concrete model id.'}>
-                <TextInput
-                  value={settings.freeLlmApiModel}
-                  onChange={(e) => onChange({ freeLlmApiModel: e.target.value })}
-                  placeholder="auto"
-                />
-              </Field>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] font-bold text-emerald-400">FreeLLMAPI · Multi-Provider Router</div>
+                <div className="flex rounded-lg border border-app-border bg-app-bg p-0.5 text-[10px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => onChange({ freeLlmMode: 'keypool' })}
+                    className={`rounded-md px-2 py-1 transition-colors ${settings.freeLlmMode === 'keypool' ? 'bg-emerald-500 text-black' : 'text-app-dim hover:text-app-text'}`}
+                  >
+                    Key Pool ({settings.freeLlmKeys?.length || 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChange({ freeLlmMode: 'url' })}
+                    className={`rounded-md px-2 py-1 transition-colors ${settings.freeLlmMode !== 'keypool' ? 'bg-app-text text-app-bg' : 'text-app-dim hover:text-app-text'}`}
+                  >
+                    Proxy URL
+                  </button>
+                </div>
+              </div>
+
+              {settings.freeLlmMode === 'keypool' ? (
+                <div className="space-y-2.5">
+                  <p className="text-[10px] leading-relaxed text-app-dim">
+                    Routes directly through your imported provider keys (OpenRouter, NVIDIA, Cloudflare, Zhipu, Google, Groq, custom) with automatic failover — no local proxy required.
+                  </p>
+
+                  <input
+                    ref={keyFileInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleKeyFileUpload}
+                    className="hidden"
+                  />
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => keyFileInputRef.current?.click()}
+                      className="rounded-lg bg-emerald-500 px-2.5 py-1.5 text-[11px] font-bold text-black hover:bg-emerald-400 transition-colors"
+                    >
+                      Import freellmapi-keys.json
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowJsonPaste((v) => !v)}
+                      className="rounded-lg border border-app-border bg-app-bg px-2.5 py-1.5 text-[11px] font-semibold text-app-text hover:border-app-text/40 transition-colors"
+                    >
+                      {showJsonPaste ? 'Hide JSON paste' : 'Paste JSON'}
+                    </button>
+                    {(settings.freeLlmKeys?.length || 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onChange({ freeLlmKeys: [] });
+                          setImportStatus(null);
+                          setProbe(null);
+                        }}
+                        className="ml-auto rounded-lg border border-app-border px-2 py-1.5 text-[10px] font-bold text-app-dim hover:text-red-400 hover:border-red-400/40"
+                      >
+                        Clear keys
+                      </button>
+                    )}
+                  </div>
+
+                  {showJsonPaste && (
+                    <div className="space-y-1.5">
+                      <textarea
+                        rows={4}
+                        value={jsonInput}
+                        onChange={(e) => setJsonInput(e.target.value)}
+                        placeholder={'Paste freellmapi-keys.json contents: {"version":1,"keys":[...]}'}
+                        className="w-full rounded-lg border border-app-border bg-app-bg p-2 font-mono text-[10px] text-app-text outline-none focus:border-emerald-500/60"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => importKeysFromText(jsonInput)}
+                        disabled={!jsonInput.trim()}
+                        className="rounded-lg bg-app-text px-2.5 py-1 text-[10px] font-bold text-app-bg disabled:opacity-40"
+                      >
+                        Load Keys JSON
+                      </button>
+                    </div>
+                  )}
+
+                  {importStatus && (
+                    <div className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold ${importStatus.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-red-500/30 bg-red-500/10 text-red-300'}`}>
+                      {importStatus.text}
+                    </div>
+                  )}
+
+                  {(settings.freeLlmKeys?.length || 0) > 0 && (
+                    <div className="max-h-36 space-y-1 overflow-y-auto custom-scrollbar rounded-lg border border-app-border bg-app-bg/70 p-2">
+                      {settings.freeLlmKeys.map((entry, idx) => (
+                        <div key={`${entry.platform}-${idx}`} className="flex items-center gap-2 rounded px-1.5 py-1 text-[10px] hover:bg-app-panel">
+                          <input
+                            type="checkbox"
+                            checked={entry.enabled !== false}
+                            onChange={() => toggleKeyEnabled(idx)}
+                            className="accent-emerald-500"
+                            title="Enable/disable this key"
+                          />
+                          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono font-bold uppercase text-emerald-300">
+                            {entry.platform}
+                          </span>
+                          <span className="truncate font-mono text-app-dim">{maskKey(entry.key)}</span>
+                          {(entry.label || entry.baseUrl) && (
+                            <span className="truncate text-app-dim/70">{entry.label || entry.baseUrl}</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeKeyEntry(idx)}
+                            className="ml-auto text-app-dim hover:text-red-400"
+                            title="Remove key"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <Field label="Model / routing" hint={'Use "auto", "auto:fast", "auto:smart", or click a model after Test connection (e.g. nvidia:meta/llama-3.3-70b-instruct).'}>
+                    <TextInput
+                      value={settings.freeLlmApiModel}
+                      onChange={(e) => onChange({ freeLlmApiModel: e.target.value.trim() })}
+                      placeholder="auto"
+                    />
+                  </Field>
+                </div>
+              ) : (
+                <>
+                  <Field label="Base URL" hint="Self-hosted default is http://localhost:3001/v1 (or http://127.0.0.1:31415/v1).">
+                    <TextInput
+                      value={settings.freeLlmApiBaseUrl}
+                      onChange={(e) => onChange({ freeLlmApiBaseUrl: e.target.value.replace(/\s+/g, '') })}
+                      placeholder="http://127.0.0.1:31415/v1"
+                    />
+                  </Field>
+                  <Field label="Unified API key" hint="The freellmapi-… key from the FreeLLMAPI Keys page. Sent only to your own /api/maggi proxy.">
+                    <TextInput
+                      type="password"
+                      value={settings.freeLlmApiKey}
+                      onChange={(e) => onChange({ freeLlmApiKey: e.target.value.trim() })}
+                      placeholder="freellmapi-••••••••"
+                    />
+                  </Field>
+                  <Field label="Model" hint={'“auto” lets the router pick. Try auto:fast, auto:smart, or a concrete model id.'}>
+                    <TextInput
+                      value={settings.freeLlmApiModel}
+                      onChange={(e) => onChange({ freeLlmApiModel: e.target.value.trim() })}
+                      placeholder="auto"
+                    />
+                  </Field>
+                  <button
+                    type="button"
+                    onClick={() => onChange({ freeLlmMode: 'keypool' })}
+                    className="text-[10px] font-semibold text-emerald-400 underline hover:text-emerald-300"
+                  >
+                    Have a freellmapi-keys.json export? Switch to Key Pool to import keys directly →
+                  </button>
+                </>
+              )}
             </div>
           )}
 
           {settings.provider === 'openai-compatible' && (
             <div className="space-y-3">
-              <Field label="Base URL"><TextInput value={settings.openAiBaseUrl} onChange={(e) => onChange({ openAiBaseUrl: e.target.value })} placeholder="https://api.openai.com/v1" /></Field>
-              <Field label="API key"><TextInput type="password" value={settings.openAiApiKey} onChange={(e) => onChange({ openAiApiKey: e.target.value })} /></Field>
-              <Field label="Model"><TextInput value={settings.openAiModel} onChange={(e) => onChange({ openAiModel: e.target.value })} /></Field>
+              <Field label="Base URL"><TextInput value={settings.openAiBaseUrl} onChange={(e) => onChange({ openAiBaseUrl: e.target.value.replace(/\s+/g, '') })} placeholder="https://api.openai.com/v1" /></Field>
+              <Field label="API key"><TextInput type="password" value={settings.openAiApiKey} onChange={(e) => onChange({ openAiApiKey: e.target.value.trim() })} /></Field>
+              <Field label="Model"><TextInput value={settings.openAiModel} onChange={(e) => onChange({ openAiModel: e.target.value.trim() })} /></Field>
             </div>
           )}
 
           {settings.provider === 'ollama' && (
             <div className="space-y-3">
-              <Field label="Ollama URL"><TextInput value={settings.ollamaBaseUrl} onChange={(e) => onChange({ ollamaBaseUrl: e.target.value })} /></Field>
-              <Field label="Model"><TextInput value={settings.ollamaModel} onChange={(e) => onChange({ ollamaModel: e.target.value })} /></Field>
+              <Field
+                label="Ollama URL"
+                hint="For HTTPS preview, run: cloudflared tunnel --url http://localhost:11434 and paste the https://....trycloudflare.com URL here."
+              >
+                <TextInput
+                  value={settings.ollamaBaseUrl}
+                  onChange={(e) => onChange({ ollamaBaseUrl: e.target.value.replace(/\s+/g, '') })}
+                  placeholder="https://your-tunnel.trycloudflare.com"
+                />
+              </Field>
+              <Field label="Model"><TextInput value={settings.ollamaModel} onChange={(e) => onChange({ ollamaModel: e.target.value.trim() })} /></Field>
             </div>
           )}
 
           {settings.provider === 'gemini' && (
-            <Field label="Gemini model" hint="Uses the app's existing GEMINI_API_KEY.">
-              <TextInput value={settings.geminiModel} onChange={(e) => onChange({ geminiModel: e.target.value })} />
-            </Field>
+            <div className="space-y-2">
+              <GeminiModelDrawer
+                compact
+                label="Gemini model"
+                value={settings.geminiModel}
+                onChange={(geminiModel) => onChange({ geminiModel })}
+              />
+              <p className="text-[10px] leading-relaxed text-app-dim/80">
+                Uses the server&apos;s GEMINI_API_KEY automatically.
+              </p>
+            </div>
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={runProbe}
               disabled={probing}
-              className="rounded-lg bg-app-text px-3 py-2 text-[11px] font-bold text-app-bg disabled:opacity-50"
+              className="shrink-0 rounded-lg bg-app-text px-3 py-2 text-[11px] font-bold text-app-bg disabled:opacity-50"
             >
               {probing ? 'Probing…' : 'Test connection'}
             </button>
             {probe && (
-              <span className={`text-[11px] font-semibold ${probe.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
+              <span className={`text-[11px] font-semibold break-words ${probe.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
                 {probe.ok ? '✓ ' : '⚠ '}{probe.detail}
               </span>
             )}
@@ -171,7 +398,11 @@ const MaggiSettingsPanel: React.FC<Props> = ({ settings, onChange, onReset }) =>
                 {probe.models.slice(0, 40).map((m) => (
                   <button
                     key={m}
-                    onClick={() => onChange({ freeLlmApiModel: m })}
+                    onClick={() => {
+                      if (settings.provider === 'ollama') onChange({ ollamaModel: m });
+                      else if (settings.provider === 'openai-compatible') onChange({ openAiModel: m });
+                      else onChange({ freeLlmApiModel: m });
+                    }}
                     className="rounded bg-app-panel px-1.5 py-0.5 text-[10px] text-app-dim hover:text-app-text"
                     title="Use this model"
                   >

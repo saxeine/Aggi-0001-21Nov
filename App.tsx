@@ -16,7 +16,7 @@ import MIPrOMPTLibraryView from './components/MIPrOMPTLibraryView';
 import { FinanceView } from './components/FinanceView';
 import MaggiView from './components/MaggiView';
 import SxaBoardApp from './src/media_suite/SxaBoardTool/App';
-import { MediaItem, VoiceSettings, PromptTemplate, CastMember, MIPrOMPTItem } from './types';
+import { MediaItem, Message, VoiceSettings, PromptTemplate, CastMember, MIPrOMPTItem } from './types';
 import { useThemeEngine } from './hooks/useThemeEngine';
 import { useSessionManager } from './hooks/useSessionManager';
 import { useAI } from './hooks/useAI';
@@ -25,7 +25,9 @@ import { useMIPrOMPTLibrary } from './hooks/useMIPrOMPTLibrary';
 import { useCastLibrary } from './hooks/useCastLibrary';
 import { useCharacterLibrary } from './hooks/useCharacterLibrary';
 import { generateResponse, generateSpeech, searchWeb, chunkText, base64ToText, translateText } from './services/gemini'; 
-import { saveAudioBlobToIDB, loadAudioBlobFromIDB } from './services/storage'; 
+import { saveAudioBlobToIDB, loadAudioBlobFromIDB } from './services/storage';
+import { getMaggiStore } from './services/maggi/store';
+import { DEFAULT_GEMINI_MODEL } from './constants/geminiModels';
 
 const App: React.FC = () => {
   const { theme, setTheme, settings, setSettings } = useThemeEngine();
@@ -882,7 +884,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
          prompt += " IMPORTANT: Return ONLY the raw HTML code starting with <!DOCTYPE html>. Ensure it is self-contained with internal CSS.";
      }
      try {
-        const model = settings.model || 'gemini-3.8-flash';
+        const model = settings.model || DEFAULT_GEMINI_MODEL;
         const cacheName = (toolId === 'youtube_transcript' || toolId === 'text_summarizer') ? undefined : activeSession.geminiCacheName;
         
         let code = "";
@@ -1120,7 +1122,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
               activeSession.selectedMediaIds.includes(item.id)
           ) || [];
           const prompt = `Tell me more about "${label}" and its context based on the sources. Provide a detailed summary and analysis.`;
-          const model = settings.model || 'gemini-3.8-flash';
+          const model = settings.model || DEFAULT_GEMINI_MODEL;
           const result = await generateResponse(prompt, [], activeMediaItems, model, activeSession?.geminiCacheName);
           setMindMapPopup({ title: label, content: result.text, isLoading: false });
       } catch (e) {
@@ -1364,6 +1366,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
                 onUpdateCastMember={updateCastMember}
                 onDeleteCastMember={deleteCastMember}
                 onResetLibrary={resetLibrary}
+                onOpenMaggi={() => { setIsSettingsOpen(false); setViewMode('maggi'); }}
               />
           </div>
       );
@@ -1430,6 +1433,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
                 onUpdateCastMember={updateCastMember}
                 onDeleteCastMember={deleteCastMember}
                 onResetLibrary={resetLibrary}
+                onOpenMaggi={() => { setIsSettingsOpen(false); setViewMode('maggi'); }}
               />
           </div>
       );
@@ -1475,6 +1479,9 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
                       mimeType: m.mimeType,
                       data: m.data,
                   }))}
+                  onSaveToSession={(title, content) => {
+                      addTextItem(title, content);
+                  }}
               />
           </div>
       );
@@ -1552,6 +1559,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
                 onUpdateCastMember={updateCastMember}
                 onDeleteCastMember={deleteCastMember}
                 onResetLibrary={resetLibrary}
+                onOpenMaggi={() => { setIsSettingsOpen(false); setViewMode('maggi'); }}
               />
           </div>
       );
@@ -1734,6 +1742,22 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
                 sessionDescription={activeSession.description}
                 onUpdateDescription={(desc) => updateSessionDescription(activeSession.id, desc)}
                 onOpenSettings={() => setIsSettingsOpen(true)}
+                onSaveToMaggi={async (msg: Message, queryText: string) => {
+                  const store = getMaggiStore();
+                  await store.saveQuery({
+                    query: queryText,
+                    answer: msg.content,
+                    citations: msg.citations,
+                    workspaceName: activeSession.name,
+                    usage: msg.maggiMeta
+                      ? {
+                        model: msg.maggiMeta.model,
+                        provider: msg.maggiMeta.provider,
+                        routedVia: msg.maggiMeta.routedVia,
+                      }
+                      : undefined,
+                  });
+                }}
                 onEditMessage={(id, newContent) => {
                   updateActiveSession((s) => ({
                     ...s,
@@ -1881,6 +1905,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
         onUpdateCastMember={updateCastMember}
         onDeleteCastMember={deleteCastMember}
         onResetLibrary={resetLibrary}
+        onOpenMaggi={() => { setIsSettingsOpen(false); setViewMode('maggi'); }}
       />
     </div>
   );

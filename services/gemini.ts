@@ -136,7 +136,7 @@ export const chunkText = (text: string, maxChars: number = 12000): string[] => {
 export const translateText = async (
   text: string, 
   targetLang: string, 
-  modelName: string = 'gemini-3.8-flash'
+  modelName: string = 'gemini-4-hydrogen'
 ): Promise<string> => {
   const chunks = chunkText(text, 12000);
   let translatedContent = '';
@@ -152,7 +152,7 @@ export const translateText = async (
 
 export const generateTagsForMedia = async (
   mediaItem: MediaItem,
-  modelName: string = 'gemini-3.8-flash'
+  modelName: string = 'gemini-4-hydrogen'
 ): Promise<string[]> => {
   try {
     let parts: any[] = [];
@@ -289,7 +289,7 @@ export const generateResponse = async (
   currentPrompt: string,
   history: Message[],
   mediaItems: MediaItem[],
-  modelName: string = 'gemini-3.8-flash',
+  modelName: string = 'gemini-4-hydrogen',
   cachedContentName?: string,
   forceSearch: boolean = false
 ): Promise<{ text: string, groundingChunks?: any[] }> => {
@@ -408,7 +408,7 @@ export const generateSpeech = async (text: string, speakers: number = 1, voiceSe
     }
 
     const response = await callGeminiApi('generate', {
-        model: "gemini-3.1-flash-tts-preview",
+        model: "gemini-3.8-flash-tts",
         contents: [{ parts: [{ text: promptText }] }],
         config: config
     });
@@ -439,7 +439,7 @@ export const generateSpeech = async (text: string, speakers: number = 1, voiceSe
   }
 };
 
-export const generateSuggestions = async (mediaItems: MediaItem[], modelName: string = 'gemini-3.8-flash'): Promise<string[]> => {
+export const generateSuggestions = async (mediaItems: MediaItem[], modelName: string = 'gemini-4-hydrogen'): Promise<string[]> => {
   if (mediaItems.length === 0) {
     return [
       "What can you help me with?",
@@ -500,7 +500,7 @@ export const generateSuggestions = async (mediaItems: MediaItem[], modelName: st
   }
 };
 
-export const generateMindMapJson = async (mediaItems: MediaItem[], modelName: string = 'gemini-3.8-flash'): Promise<MindMapNode | null> => {
+export const generateMindMapJson = async (mediaItems: MediaItem[], modelName: string = 'gemini-4-hydrogen'): Promise<MindMapNode | null> => {
     if (mediaItems.length === 0) return null;
     const parts = prepareMediaParts(mediaItems);
     const prompt = `Analyze the provided content and construct a Mind Map hierarchical tree representation of the key concepts.
@@ -546,7 +546,7 @@ export const searchWeb = async (query: string, excludeUrls: string[] = []): Prom
   }
   try {
     const response = await callGeminiApi('generate', {
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: [{ parts: [{ text: prompt }] }],
         config: { tools: [{ googleSearch: {} }] }
     });
@@ -575,7 +575,7 @@ export const bringToLife = async (
   prompt: string,
   imageBase64?: string,
   mimeType?: string,
-  modelName: string = 'gemini-3.8-flash'
+  modelName: string = 'gemini-4-hydrogen'
 ): Promise<string> => {
   try {
     const data = await callGeminiApi('bring-to-life', { prompt, imageBase64, mimeType, modelName });
@@ -592,7 +592,7 @@ export const bringToLife = async (
 export const transcribeAudio = async (base64Data: string, mimeType: string): Promise<string> => {
   try {
     const response = await callGeminiApi('generate', {
-      model: 'gemini-3.8-flash',
+      model: 'gemini-4-hydrogen',
       contents: [
         {
           role: 'user',

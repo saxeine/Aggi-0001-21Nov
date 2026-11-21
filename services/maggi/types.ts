@@ -183,3 +183,39 @@ export interface RagIndexStats {
   dims: number;
   lastIndexedAt?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Chat Persistence & Saved Queries
+// ---------------------------------------------------------------------------
+
+export interface PersistedMaggiMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  citations?: Citation[];
+  retrieval?: RetrievedContext;
+  usage?: RagAnswer['usage'];
+  error?: boolean;
+}
+
+export interface SavedMaggiQuery {
+  id: string;
+  title: string;
+  query: string;
+  answer: string;
+  pinned: boolean;
+  workspaceName?: string;
+  citations: Citation[];
+  retrieval?: {
+    tokens: number;
+    latencyMs: number;
+    trace: string[];
+    chunkCount: number;
+    docNames: string[];
+  };
+  usage?: RagAnswer['usage'];
+  createdAt: number;
+  updatedAt: number;
+}
+

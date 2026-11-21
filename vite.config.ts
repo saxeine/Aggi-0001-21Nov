@@ -8,8 +8,7 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
-        // Allow the sandbox preview domain (e.g. 3000-xxxx.e2b.app) to load the app.
-        allowedHosts: ['.e2b.app'],
+        allowedHosts: true,
         hmr: false,
         proxy: {
           '/ollama': {

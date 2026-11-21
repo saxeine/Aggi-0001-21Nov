@@ -76,7 +76,29 @@
         "userId": { "type": "string" },
         "slides": { "type": "array" }
       },
-      "required": ["id", "name", "slides"]
+        "required": ["id", "name", "slides"]
+    },
+    "SavedMaggiQuery": {
+      "title": "SavedMaggiQuery",
+      "description": "A persisted MAGGI RAG query, grounded answer, and citations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "query": { "type": "string" },
+        "answer": { "type": "string" },
+        "pinned": { "type": "boolean" },
+        "workspaceName": { "type": "string" },
+        "citations": { "type": "array" },
+        "retrieval": { "type": "object" },
+        "model": { "type": "string" },
+        "provider": { "type": "string" },
+        "routedVia": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "title", "query", "answer", "pinned", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -118,6 +140,10 @@
         "required": ["id", "timestamp", "type", "analysis"]
       },
       "description": "Durable Travel Intell reports"
+    },
+    "maggi_queries/{queryId}": {
+      "schema": "SavedMaggiQuery",
+      "description": "Persisted MAGGI RAG queries, answers, and citations"
     }
   }
 }

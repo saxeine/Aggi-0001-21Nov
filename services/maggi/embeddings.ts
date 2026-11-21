@@ -123,22 +123,75 @@ const requestGeminiEmbeddings = async (texts: string[], model: string, apiKey?: 
   return data.vectors.map((v: number[]) => l2Normalise(v));
 };
 
+const normaliseEmbedBaseUrl = (url: string): string => {
+  let cleaned = (url || '').replace(/\s+/g, '').replace(/\/+$/, '');
+  if (!cleaned) return '';
+  cleaned = cleaned.replace(/^(https?):\/([^/])/i, '$1://$2');
+  if (!/^https?:\/\//i.test(cleaned)) {
+    const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(cleaned);
+    cleaned = `${isLocal || /:\d+/.test(cleaned) ? 'http' : 'https'}://${cleaned}`;
+  }
+  cleaned = cleaned
+    .replace(/\/(chat\/completions|completions|embeddings|models)$/i, '')
+    .replace(/\/+$/, '');
+  if (!/\/v\d+(\.\d+)?$/i.test(cleaned) && !cleaned.toLowerCase().endsWith('/v1')) {
+    cleaned = `${cleaned}/v1`;
+  }
+  return cleaned;
+};
+
+const isLoopbackEmbedUrl = (url: string): boolean => {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+};
+
 const requestOpenAiEmbeddings = async (
   texts: string[],
   baseUrl: string,
   apiKey: string,
   model: string,
 ): Promise<number[][]> => {
+  const cleanBase = normaliseEmbedBaseUrl(baseUrl);
+  const cleanKey = (apiKey || '').trim();
   const res = await fetch(`/api/maggi/embed`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ texts, baseUrl, apiKey, model, backend: 'openai' }),
+    body: JSON.stringify({ texts, baseUrl: cleanBase, apiKey: cleanKey, model, backend: 'openai' }),
   });
+  let data: any;
   if (!res.ok) {
     const msg = await res.text().catch(() => '');
+    let parsed: any = null;
+    try { parsed = JSON.parse(msg); } catch { /* raw text */ }
+    if (isLoopbackEmbedUrl(cleanBase) && (parsed?.code === 'LOOPBACK_UNREACHABLE' || /ECONNREFUSED|LOOPBACK_UNREACHABLE|fetch failed/i.test(msg))) {
+      const directRes = await fetch(`${cleanBase}/embeddings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(cleanKey ? { Authorization: `Bearer ${cleanKey}` } : {}),
+        },
+        body: JSON.stringify({ model: model || 'auto', input: texts }),
+      });
+      if (!directRes.ok) {
+        const directMsg = await directRes.text().catch(() => '');
+        throw new Error(`OpenAI-compatible embeddings failed: ${directRes.status} ${directMsg.slice(0, 200)}`);
+      }
+      data = await directRes.json();
+      const vectors = (data.data ?? [])
+        .sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
+        .map((d: any) => d.embedding);
+      if (!Array.isArray(vectors) || vectors.length !== texts.length) {
+        throw new Error('Embeddings endpoint returned an unexpected payload');
+      }
+      return vectors.map((v: number[]) => l2Normalise(v));
+    }
     throw new Error(`OpenAI-compatible embeddings failed: ${res.status} ${msg.slice(0, 200)}`);
   }
-  const data = await res.json();
+  data = await res.json();
   if (!Array.isArray(data.vectors) || data.vectors.length !== texts.length) {
     throw new Error('Embeddings endpoint returned an unexpected payload');
   }

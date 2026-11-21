@@ -1,6 +1,35 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+
+    function isValidMaggiQuery(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'query', 'answer', 'pinned', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'userId', 'title', 'query', 'answer', 'pinned',
+          'workspaceName', 'citations', 'retrieval', 'model', 'provider', 'routedVia',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.userId is string && data.userId == request.auth.uid
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 240
+        && data.query is string && data.query.size() > 0 && data.query.size() <= 10000
+        && data.answer is string && data.answer.size() <= 50000
+        && data.pinned is bool
+        && (!('workspaceName' in data) || (data.workspaceName is string && data.workspaceName.size() <= 200))
+        && (!('model' in data) || (data.model is string && data.model.size() <= 120))
+        && (!('provider' in data) || (data.provider is string && data.provider.size() <= 60))
+        && (!('routedVia' in data) || (data.routedVia is string && data.routedVia.size() <= 160))
+        && (!('citations' in data) || (data.citations is list && data.citations.size() <= 25 && (data.citations.size() == 0 || data.citations[0] is map)))
+        && (!('retrieval' in data) || data.retrieval is map);
+    }
+
     // Default-deny safety net
     match /{document=**} {
       allow read, write: if false;
@@ -42,6 +71,27 @@ service cloud.firestore {
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
       allow read, delete: if request.auth != null && resource.data.userId == request.auth.uid;
       allow update: if false;
+    }
+
+    match /maggi_queries/{queryId} {
+      allow get: if isSignedIn() && isValidId(queryId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(queryId)
+        && incoming().id == queryId
+        && isValidMaggiQuery(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(queryId)
+        && existing().userId == request.auth.uid
+        && isValidMaggiQuery(incoming())
+        && incoming().id == existing().id
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'pinned', 'updatedAt']);
+      allow delete: if isSignedIn() && isValidId(queryId) && existing().userId == request.auth.uid;
     }
   }
 }

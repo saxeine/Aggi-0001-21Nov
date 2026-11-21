@@ -2,8 +2,19 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Theme, ThemeSettings, VoiceSettings, CastMember } from '../types';
-import { getOllamaModels, OllamaModel } from '../services/ollama';
+import {
+  cleanOllamaEndpoint,
+  isLoopbackOrPrivateEndpoint,
+  OllamaModel,
+  OllamaTestResult,
+  testOllamaConnection,
+} from '../services/ollama';
 import { useLanguage } from '../contexts/LanguageContext';
+import GeminiModelDrawer from './GeminiModelDrawer';
+import MaggiSettingsPanel from './maggi/MaggiSettings';
+import { getMaggiStore } from '../services/maggi/store';
+import { DEFAULT_MAGGI_SETTINGS, MaggiSettings as MaggiConfig } from '../maggi/config';
+import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -20,6 +31,7 @@ interface SettingsPanelProps {
   onUpdateCastMember?: (id: string, m: Partial<CastMember>) => void;
   onDeleteCastMember?: (id: string) => void;
   onResetLibrary?: () => void;
+  onOpenMaggi?: () => void;
 }
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -36,13 +48,21 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onAddCastMember,
   onUpdateCastMember,
   onDeleteCastMember,
-  onResetLibrary
+  onResetLibrary,
+  onOpenMaggi
 }) => {
   const { language, setLanguage, t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'ai' | 'visual' | 'cast'>(initialTab);
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [ollamaError, setOllamaError] = useState<string | null>(null);
+  const [ollamaTestResult, setOllamaTestResult] = useState<OllamaTestResult | null>(null);
+  const [copiedTunnelCmd, setCopiedTunnelCmd] = useState(false);
+
+  const maggiStore = getMaggiStore();
+  const [maggiConfig, setMaggiConfig] = useState<MaggiConfig>(() => maggiStore.getSettings());
+  const [maggiStats, setMaggiStats] = useState(() => maggiStore.stats());
+  const [maggiSavedCount, setMaggiSavedCount] = useState(() => maggiStore.listSavedQueries().length);
   
   // Cast Editing State
   const [editingMember, setEditingMember] = useState<CastMember | null>(null);
@@ -65,6 +85,27 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return '#3b82f6'; // default to Blue
   });
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void maggiStore.hydrate().then(() => {
+      if (cancelled) return;
+      setMaggiConfig(maggiStore.getSettings());
+      setMaggiStats(maggiStore.stats());
+      setMaggiSavedCount(maggiStore.listSavedQueries().length);
+    });
+    const unsub = maggiStore.subscribe(() => {
+      if (cancelled) return;
+      setMaggiConfig(maggiStore.getSettings());
+      setMaggiStats(maggiStore.stats());
+      setMaggiSavedCount(maggiStore.listSavedQueries().length);
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [isOpen, maggiStore]);
 
   useEffect(() => {
     localStorage.setItem('aggrigator_accent_color_hex', accentColor);
@@ -191,31 +232,75 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   }, [isOpen]);
 
-  // Mixed Content Detection
+  // Mixed Content Detection (only local/private HTTP endpoints cannot be reached cleanly from HTTPS)
   const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
-  const isHttpEndpoint = settings.ollamaEndpoint.trim().startsWith('http://');
-  const showMixedContentWarning = isHttps && isHttpEndpoint && settings.provider === 'ollama';
+  const isHttpEndpoint = cleanOllamaEndpoint(settings.ollamaEndpoint).startsWith('http://');
+  const showMixedContentWarning =
+    isHttps &&
+    isHttpEndpoint &&
+    isLoopbackOrPrivateEndpoint(settings.ollamaEndpoint) &&
+    settings.provider === 'ollama';
 
   useEffect(() => {
-    if (isOpen && settings.provider === 'ollama' && activeTab === 'ai') {
-      fetchOllamaModels();
+    if (showMixedContentWarning) {
+      setOllamaError(null);
+      setOllamaTestResult(null);
+      return;
     }
-  }, [isOpen, settings.provider, activeTab]);
+    if (isOpen && settings.provider === 'ollama' && activeTab === 'ai' && settings.ollamaEndpoint?.trim()) {
+      fetchOllamaModels();
+    } else if (settings.provider !== 'ollama') {
+      setOllamaError(null);
+      setOllamaTestResult(null);
+    }
+  }, [isOpen, settings.provider, activeTab, showMixedContentWarning]);
 
   const fetchOllamaModels = async () => {
     setIsFetchingModels(true);
     setOllamaError(null);
     try {
-      const models = await getOllamaModels(settings.ollamaEndpoint);
-      setOllamaModels(models);
-      if (!settings.ollamaModel && models.length > 0) {
-        onUpdateSettings({ ...settings, ollamaModel: models[0].name });
+      const result = await testOllamaConnection(settings.ollamaEndpoint);
+      setOllamaTestResult(result);
+      if (result.ok) {
+        setOllamaModels(result.models);
+        const nextSettings = { ...settings };
+        let changed = false;
+        if (result.normalizedEndpoint && result.normalizedEndpoint !== settings.ollamaEndpoint) {
+          nextSettings.ollamaEndpoint = result.normalizedEndpoint;
+          changed = true;
+        }
+        if (!settings.ollamaModel && result.models.length > 0) {
+          nextSettings.ollamaModel = result.models[0].name;
+          changed = true;
+        }
+        if (changed) {
+          onUpdateSettings(nextSettings);
+        }
+      } else {
+        setOllamaError(result.detail || "Could not connect to Ollama.");
       }
     } catch (err: any) {
-      setOllamaError(err.message || "Could not connect. Ensure Ollama is running with OLLAMA_ORIGINS=\"*\"");
+      const msg = err?.message || "Could not connect. Ensure Ollama is running.";
+      setOllamaError(msg);
+      setOllamaTestResult({
+        ok: false,
+        detail: msg,
+        models: [],
+        latencyMs: 0,
+        via: 'browser-direct',
+        normalizedEndpoint: cleanOllamaEndpoint(settings.ollamaEndpoint) || settings.ollamaEndpoint,
+      });
     } finally {
       setIsFetchingModels(false);
     }
+  };
+
+  const handleCopyTunnelCmd = () => {
+    const cmd = 'cloudflared tunnel --url http://localhost:11434';
+    navigator.clipboard?.writeText(cmd).then(() => {
+      setCopiedTunnelCmd(true);
+      setTimeout(() => setCopiedTunnelCmd(false), 1800);
+    }).catch(() => {});
   };
 
   const handleBgChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -241,9 +326,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       hue: 0, 
       textSize: 100,
       showLabels: true,
-      model: 'gemini-3.8-flash',
+      model: DEFAULT_GEMINI_MODEL,
       provider: 'gemini',
       enableCaching: false,
+      maggiAutoIndexSession: true,
       geminiApiKey: '',
       ollamaEndpoint: 'http://localhost:11434',
       ollamaModel: '',
@@ -401,22 +487,28 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
              <div className="bg-app-panel rounded-xl p-3 border border-app-border">
                 <label className="block text-xs font-bold text-app-dim uppercase tracking-wider mb-2">AI Provider</label>
                 
-                <div className="flex bg-app-card rounded-lg p-1 mb-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 bg-app-card rounded-lg p-1 mb-3">
                   <button
                       onClick={() => onUpdateSettings({ ...settings, provider: 'gemini' })}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${settings.provider === 'gemini' ? 'bg-app-text text-app-bg shadow' : 'text-app-muted hover:text-app-text'}`}
+                      className={`py-1.5 text-xs font-bold rounded-md transition-all ${settings.provider === 'gemini' ? 'bg-app-text text-app-bg shadow' : 'text-app-muted hover:text-app-text'}`}
                   >
                     Gemini
                   </button>
                   <button
+                      onClick={() => onUpdateSettings({ ...settings, provider: 'maggi' })}
+                      className={`py-1.5 text-xs font-bold rounded-md transition-all ${settings.provider === 'maggi' ? 'bg-emerald-500 text-black shadow' : 'text-app-muted hover:text-app-text'}`}
+                  >
+                    🧠 MAGGI
+                  </button>
+                  <button
                       onClick={() => onUpdateSettings({ ...settings, provider: 'ollama' })}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${settings.provider === 'ollama' ? 'bg-app-text text-app-bg shadow' : 'text-app-muted hover:text-app-text'}`}
+                      className={`py-1.5 text-xs font-bold rounded-md transition-all ${settings.provider === 'ollama' ? 'bg-app-text text-app-bg shadow' : 'text-app-muted hover:text-app-text'}`}
                   >
                     Ollama
                   </button>
                   <button
                       onClick={() => onUpdateSettings({ ...settings, provider: 'custom' })}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${settings.provider === 'custom' ? 'bg-app-text text-app-bg shadow' : 'text-app-muted hover:text-app-text'}`}
+                      className={`py-1.5 text-xs font-bold rounded-md transition-all ${settings.provider === 'custom' ? 'bg-app-text text-app-bg shadow' : 'text-app-muted hover:text-app-text'}`}
                   >
                     Custom AI
                   </button>
@@ -425,29 +517,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 {/* Gemini Settings */}
                 {settings.provider === 'gemini' && (
                   <div className="space-y-4 animate-pulse-fast-once">
-                      <div>
-                        <p className="text-[10px] text-app-dim mb-1">Select Gemini Model Class:</p>
-                        <div className="grid grid-cols-3 gap-2">
-                          <button
-                            onClick={() => onUpdateSettings({ ...settings, model: 'gemini-3.8-flash' })}
-                            className={`py-2 text-xs font-medium rounded-md border transition-all ${(!settings.model || settings.model === 'gemini-3.8-flash' || settings.model === 'gemini-3.5-flash' || settings.model === 'gemini-2.5-flash') ? 'border-app-text text-app-text bg-app-text/10' : 'border-app-border text-app-muted hover:border-app-dim'}`}
-                          >
-                            Flash 3.8
-                          </button>
-                          <button
-                            onClick={() => onUpdateSettings({ ...settings, model: 'gemini-4-argon' })}
-                            className={`py-2 text-xs font-medium rounded-md border transition-all ${(settings.model === 'gemini-4-argon' || settings.model === 'gemini-3.1-pro-preview') ? 'border-app-text text-app-text bg-app-text/10' : 'border-app-border text-app-muted hover:border-app-dim'}`}
-                          >
-                            Pro 4 (Argon)
-                          </button>
-                          <button
-                            onClick={() => onUpdateSettings({ ...settings, model: 'gemini-3.1-flash-lite' })}
-                            className={`py-2 text-xs font-medium rounded-md border transition-all ${settings.model === 'gemini-3.1-flash-lite' ? 'border-app-text text-app-text bg-app-text/10' : 'border-app-border text-app-muted hover:border-app-dim'}`}
-                          >
-                            Flash Lite 3.1
-                          </button>
-                        </div>
-                      </div>
+                      <GeminiModelDrawer
+                        value={settings.model}
+                        onChange={(model) => onUpdateSettings({ ...settings, model })}
+                      />
 
                       <div className="space-y-1.5 pt-1">
                         <label className="block text-[10px] text-app-dim">
@@ -493,55 +566,189 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 )}
 
+                {/* MAGGI (Grounded RAG) Settings */}
+                {settings.provider === 'maggi' && (
+                  <div className="space-y-4 animate-pulse-fast-once">
+                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-emerald-400">
+                            🧠 MAGGI RAG Engine Active
+                          </div>
+                          <p className="text-[10px] text-app-dim mt-0.5">
+                            Routes workspace chat, citations, and suggestions through MAGGI hybrid retrieval (BM25 + vectors) and your selected brain.
+                          </p>
+                        </div>
+                        {onOpenMaggi && (
+                          <button
+                            type="button"
+                            onClick={onOpenMaggi}
+                            className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-bold text-black hover:bg-emerald-400 transition-colors"
+                          >
+                            Open Full MAGGI Workspace →
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-app-text/90">
+                        <span className="rounded bg-app-bg px-2 py-0.5 border border-app-border">
+                          📚 {maggiStats.documents} docs · {maggiStats.chunks} chunks indexed
+                        </span>
+                        <span className="rounded bg-app-bg px-2 py-0.5 border border-app-border">
+                          🔖 {maggiSavedCount} saved queries
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5">
+                      <div>
+                        <p className="text-xs font-bold text-app-text">Auto-index Active Session Sources</p>
+                        <p className="text-[9px] text-app-dim">
+                          Automatically ingest selected workspace sources into MAGGI before answering.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onUpdateSettings({
+                            ...settings,
+                            maggiAutoIndexSession: settings.maggiAutoIndexSession === false,
+                          })
+                        }
+                        className={`w-10 h-5 rounded-full flex items-center transition-colors p-1 ${
+                          settings.maggiAutoIndexSession !== false ? 'bg-emerald-500' : 'bg-app-border'
+                        }`}
+                      >
+                        <div
+                          className={`w-3 h-3 rounded-full bg-white shadow-md transform transition-transform ${
+                            settings.maggiAutoIndexSession !== false ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="border-t border-app-border pt-3">
+                      <MaggiSettingsPanel
+                        settings={maggiConfig}
+                        onChange={(patch) => setMaggiConfig(maggiStore.updateSettings(patch))}
+                        onReset={() => setMaggiConfig(maggiStore.updateSettings({ ...DEFAULT_MAGGI_SETTINGS }))}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Ollama Settings */}
                 {settings.provider === 'ollama' && (
                   <div className="space-y-3 animate-pulse-fast-once">
                       {showMixedContentWarning && (
-                        <div className="bg-yellow-900/20 border border-yellow-600/50 p-2 rounded text-[10px] text-yellow-200">
-                          <p className="font-bold">⚠️ Mixed Content Warning</p>
-                          <p>This app is running on <b>HTTPS</b>, but you are trying to connect to <b>HTTP</b> localhost.</p>
-                          <p className="mt-1">Browsers block this. <b>Solution:</b> Use <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/" target="_blank" className="underline">Cloudflare Tunnel</a>.</p>
-                          <code className="block bg-black/30 p-1 mt-1 rounded text-yellow-400 overflow-x-auto">cloudflared tunnel --url http://localhost:11434</code>
-                          <p className="mt-1">Then paste the <code>https://...</code> URL below.</p>
+                        <div className="bg-amber-950/30 border border-amber-500/40 p-2.5 rounded-lg text-[10px] text-amber-200 space-y-1.5">
+                          <p className="font-bold text-amber-300">⚠️ Local HTTP Endpoint on HTTPS Preview</p>
+                          <p>
+                            Browsers usually block <b>HTTPS</b> pages from calling local <b>HTTP</b> (`localhost:11434`).
+                            Expose Ollama via a Cloudflare Tunnel — our backend proxies it automatically (no CORS flags needed):
+                          </p>
+                          <div className="flex items-center gap-1.5 bg-black/40 p-1.5 rounded border border-amber-500/20">
+                            <code className="flex-1 text-amber-300 overflow-x-auto whitespace-nowrap">
+                              cloudflared tunnel --url http://localhost:11434
+                            </code>
+                            <button
+                              type="button"
+                              onClick={handleCopyTunnelCmd}
+                              className="shrink-0 px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold transition-colors"
+                            >
+                              {copiedTunnelCmd ? 'Copied ✓' : 'Copy'}
+                            </button>
+                          </div>
+                          <p className="opacity-90">
+                            Paste the generated <code>https://....trycloudflare.com</code> URL below and click <b>Test Connection</b>.
+                          </p>
                         </div>
                       )}
 
                       <div>
                         <label className="block text-[10px] text-app-dim mb-1">Endpoint URL</label>
-                        <div className="flex gap-2">
+                        <div className="flex gap-1.5">
                           <input 
                             type="text" 
                             value={settings.ollamaEndpoint}
-                            onChange={(e) => onUpdateSettings({ ...settings, ollamaEndpoint: e.target.value })}
-                            className="flex-1 bg-app-input border border-app-border rounded px-2 py-1 text-xs text-app-text"
-                            placeholder="e.g. https://xyz.trycloudflare.com"
+                            onChange={(e) => {
+                              setOllamaTestResult(null);
+                              setOllamaError(null);
+                              onUpdateSettings({ ...settings, ollamaEndpoint: e.target.value });
+                            }}
+                            className="flex-1 bg-app-input border border-app-border rounded px-2 py-1.5 text-xs text-app-text"
+                            placeholder="https://xyz.trycloudflare.com or http://localhost:11434"
                           />
-                          <button 
+                          <button
+                            type="button"
                             onClick={fetchOllamaModels}
-                            className="px-2 py-1 bg-app-border rounded text-xs text-app-text hover:bg-app-dim hover:text-white transition-colors"
                             disabled={isFetchingModels}
+                            className="shrink-0 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-bold transition-colors disabled:opacity-50"
+                            title="Test Ollama connectivity and load installed models"
                           >
-                            {isFetchingModels ? '...' : 'Fetch'}
+                            {isFetchingModels ? 'Testing…' : 'Test Connection'}
                           </button>
                         </div>
-                        {ollamaError && <p className="text-[10px] text-red-400 mt-1 whitespace-pre-wrap">{ollamaError}</p>}
+
+                        {ollamaTestResult && ollamaTestResult.ok && (
+                          <div className="mt-2 rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-300 flex items-center justify-between gap-2">
+                            <span className="font-semibold">✓ {ollamaTestResult.detail}</span>
+                            <span className="text-[9px] uppercase tracking-wider opacity-80 shrink-0">
+                              {ollamaTestResult.via === 'server-proxy'
+                                ? 'server proxy'
+                                : ollamaTestResult.via === 'vite-proxy'
+                                  ? 'local proxy'
+                                  : 'direct'}
+                            </span>
+                          </div>
+                        )}
+
+                        {ollamaError && (
+                          <div className="mt-2 rounded-lg border border-red-500/30 bg-red-950/25 px-2.5 py-2 text-[10px] text-red-300 prose prose-invert prose-p:my-1 prose-ol:my-1 max-w-none">
+                            <ReactMarkdown>{ollamaError}</ReactMarkdown>
+                          </div>
+                        )}
                       </div>
 
                       <div>
-                        <label className="block text-[10px] text-app-dim mb-1">Select Model</label>
-                        <select 
-                          value={settings.ollamaModel}
-                          onChange={(e) => onUpdateSettings({ ...settings, ollamaModel: e.target.value })}
-                          className="w-full bg-app-input border border-app-border rounded px-2 py-1 text-xs text-app-text focus:outline-none"
-                        >
-                          <option value="" disabled>Select a model...</option>
-                          {ollamaModels.map(m => (
-                            <option key={m.name} value={m.name}>{m.name} ({(m.size / 1024 / 1024 / 1024).toFixed(1)}GB)</option>
-                          ))}
-                        </select>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[10px] text-app-dim">Select Model</label>
+                          {ollamaModels.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={fetchOllamaModels}
+                              disabled={isFetchingModels}
+                              className="text-[10px] text-app-dim hover:text-app-text underline"
+                            >
+                              Refresh list
+                            </button>
+                          )}
+                        </div>
+                        {ollamaModels.length > 0 ? (
+                          <select 
+                            value={settings.ollamaModel}
+                            onChange={(e) => onUpdateSettings({ ...settings, ollamaModel: e.target.value })}
+                            className="w-full bg-app-input border border-app-border rounded px-2 py-1.5 text-xs text-app-text focus:outline-none"
+                          >
+                            <option value="" disabled>Select a model...</option>
+                            {ollamaModels.map(m => (
+                              <option key={m.name} value={m.name}>
+                                {m.name}{m.size ? ` (${(m.size / 1024 / 1024 / 1024).toFixed(1)}GB)` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            value={settings.ollamaModel}
+                            onChange={(e) => onUpdateSettings({ ...settings, ollamaModel: e.target.value })}
+                            placeholder="Test connection to auto-load models, or type e.g. llama3.2"
+                            className="w-full bg-app-input border border-app-border rounded px-2 py-1.5 text-xs text-app-text focus:outline-none"
+                          />
+                        )}
                       </div>
-                      <p className="text-[9px] text-app-dim italic">
-                        Note: Run <code>OLLAMA_ORIGINS="*" ollama serve</code> to allow connections.
+                      <p className="text-[9px] text-app-dim italic leading-relaxed">
+                        Tunnel URLs (`https://....trycloudflare.com`) route through our server proxy with no CORS setup needed. For direct browser loopback, start Ollama with <code>OLLAMA_ORIGINS="*" ollama serve</code>.
                       </p>
                   </div>
                 )}

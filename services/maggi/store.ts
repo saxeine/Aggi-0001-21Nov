@@ -24,6 +24,8 @@ import {
   Citation,
   RagAnswer,
   ExtractedText,
+  PersistedMaggiMessage,
+  SavedMaggiQuery,
 } from './types';
 import { chunkDocument } from './chunker';
 import { Bm25Index } from './bm25';
@@ -37,14 +39,20 @@ import {
   DEFAULT_MAGGI_SETTINGS,
   MAGGI_SETTINGS_KEY,
   MAGGI_INDEX_KEY,
+  MAGGI_CHAT_KEY,
+  MAGGI_SAVED_QUERIES_KEY,
+  MAGGI_USAGE_KEY,
   MAGGI_SYSTEM_PROMPT,
   MAGGI_CITATION_INSTRUCTION,
 } from '../../maggi/config';
 import { createBrain, brainAsLlm } from './brain';
 
 const IDB_NAME = 'MAGGI_RAG_DB';
-const IDB_VERSION = 1;
+const IDB_VERSION = 2;
 const IDB_STORE = 'index';
+const IDB_CHAT_STORE = 'chat';
+const IDB_SAVED_STORE = 'saved_queries';
+const IDB_META_STORE = 'meta';
 
 interface PersistedIndex {
   version: 1;
@@ -116,6 +124,9 @@ const openDb = (): Promise<IDBDatabase | null> =>
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+        if (!db.objectStoreNames.contains(IDB_CHAT_STORE)) db.createObjectStore(IDB_CHAT_STORE);
+        if (!db.objectStoreNames.contains(IDB_SAVED_STORE)) db.createObjectStore(IDB_SAVED_STORE);
+        if (!db.objectStoreNames.contains(IDB_META_STORE)) db.createObjectStore(IDB_META_STORE);
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => resolve(null);
@@ -124,13 +135,13 @@ const openDb = (): Promise<IDBDatabase | null> =>
     }
   });
 
-const idbPut = async (key: string, value: unknown): Promise<boolean> => {
+const idbPut = async (key: string, value: unknown, storeName = IDB_STORE): Promise<boolean> => {
   const db = await openDb();
   if (!db) return false;
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).put(value, key);
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).put(value, key);
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => resolve(false);
     } catch {
@@ -139,13 +150,13 @@ const idbPut = async (key: string, value: unknown): Promise<boolean> => {
   });
 };
 
-const idbGet = async <T,>(key: string): Promise<T | null> => {
+const idbGet = async <T,>(key: string, storeName = IDB_STORE): Promise<T | null> => {
   const db = await openDb();
   if (!db) return null;
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction(IDB_STORE, 'readonly');
-      const req = tx.objectStore(IDB_STORE).get(key);
+      const tx = db.transaction(storeName, 'readonly');
+      const req = tx.objectStore(storeName).get(key);
       req.onsuccess = () => resolve((req.result as T) ?? null);
       req.onerror = () => resolve(null);
     } catch {
@@ -153,6 +164,27 @@ const idbGet = async <T,>(key: string): Promise<T | null> => {
     }
   });
 };
+
+const getCloudQueryStorage = async () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return await import('./queryStorage');
+  } catch {
+    return null;
+  }
+};
+
+const defaultQueryTitle = (queryText: string): string => {
+  const compact = queryText.replace(/\s+/g, ' ').trim();
+  if (!compact) return 'Saved MAGGI Query';
+  return compact.length > 72 ? `${compact.slice(0, 69)}...` : compact;
+};
+
+const sortSavedQueries = (items: SavedMaggiQuery[]): SavedMaggiQuery[] =>
+  [...items].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
+  });
 
 // ---------------------------------------------------------------------------
 // Store
@@ -172,17 +204,38 @@ export class MaggiStore {
   private chunkIndex = new Map<string, RagChunk>();
   private vectorBackend: RagIndexStats['vectorBackend'] = 'none';
   private usage: MaggiUsage = { ...EMPTY_USAGE };
+  private chatMessages: PersistedMaggiMessage[] = [];
+  private savedQueries: SavedMaggiQuery[] = [];
+  private listeners = new Set<() => void>();
   private ready = false;
+  private cloudSynced = false;
 
   constructor(settings?: MaggiSettings) {
     this.settings = settings ?? loadMaggiSettings();
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {
+        /* ignore subscriber errors */
+      }
+    }
   }
 
   // --- lifecycle -----------------------------------------------------------
 
   async hydrate(): Promise<void> {
     if (this.ready) return;
-    let snapshot = await idbGet<PersistedIndex>('index');
+    let snapshot = await idbGet<PersistedIndex>('index', IDB_STORE);
     if (!snapshot) {
       try {
         const raw = localStorage.getItem(MAGGI_INDEX_KEY);
@@ -203,7 +256,84 @@ export class MaggiStore {
       }
       this.vectorBackend = (snapshot.vectorBackend as any) ?? 'hash';
     }
+
+    // Hydrate persisted chat history
+    let persistedChat = await idbGet<PersistedMaggiMessage[]>('history', IDB_CHAT_STORE);
+    if (!persistedChat) {
+      try {
+        const raw = localStorage.getItem(MAGGI_CHAT_KEY);
+        if (raw) persistedChat = JSON.parse(raw) as PersistedMaggiMessage[];
+      } catch {
+        persistedChat = null;
+      }
+    }
+    if (Array.isArray(persistedChat)) {
+      this.chatMessages = persistedChat;
+    }
+
+    // Hydrate persisted saved queries
+    let persistedQueries = await idbGet<SavedMaggiQuery[]>('list', IDB_SAVED_STORE);
+    if (!persistedQueries) {
+      try {
+        const raw = localStorage.getItem(MAGGI_SAVED_QUERIES_KEY);
+        if (raw) persistedQueries = JSON.parse(raw) as SavedMaggiQuery[];
+      } catch {
+        persistedQueries = null;
+      }
+    }
+    if (Array.isArray(persistedQueries)) {
+      this.savedQueries = sortSavedQueries(persistedQueries);
+    }
+
+    // Hydrate usage counters
+    let persistedUsage = await idbGet<MaggiUsage>('usage', IDB_META_STORE);
+    if (!persistedUsage) {
+      try {
+        const raw = localStorage.getItem(MAGGI_USAGE_KEY);
+        if (raw) persistedUsage = JSON.parse(raw) as MaggiUsage;
+      } catch {
+        persistedUsage = null;
+      }
+    }
+    if (persistedUsage && typeof persistedUsage.queries === 'number') {
+      this.usage = { ...EMPTY_USAGE, ...persistedUsage };
+    }
+
     this.ready = true;
+    this.notify();
+
+    // Best-effort non-blocking cloud sync for saved queries in browser environments
+    if (typeof window !== 'undefined' && !this.cloudSynced) {
+      this.cloudSynced = true;
+      getCloudQueryStorage()
+        .then((cloud) => cloud?.loadSavedQueriesFromFirestore())
+        .then((remote) => {
+          if (remote?.length) {
+            this.mergeRemoteSavedQueries(remote);
+          }
+        })
+        .catch(() => {});
+    }
+  }
+
+  private mergeRemoteSavedQueries(remote: SavedMaggiQuery[]): void {
+    const map = new Map<string, SavedMaggiQuery>();
+    for (const item of this.savedQueries) {
+      map.set(item.id, item);
+    }
+    let changed = false;
+    for (const item of remote) {
+      const existing = map.get(item.id);
+      if (!existing || (item.updatedAt || 0) > (existing.updatedAt || 0)) {
+        map.set(item.id, item);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.savedQueries = sortSavedQueries(Array.from(map.values()));
+      void this.persistSavedQueriesLocal();
+      this.notify();
+    }
   }
 
   async persist(): Promise<void> {
@@ -215,13 +345,34 @@ export class MaggiStore {
       vectorBackend: this.vectorBackend,
       savedAt: Date.now(),
     };
-    const ok = await idbPut('index', snapshot);
+    const ok = await idbPut('index', snapshot, IDB_STORE);
     if (!ok) {
       try {
         localStorage.setItem(MAGGI_INDEX_KEY, JSON.stringify(snapshot));
       } catch {
         console.warn('[MAGGI] Could not persist index (quota exceeded). Index is in-memory only.');
       }
+    }
+    await this.persistUsage();
+  }
+
+  private async persistUsage(): Promise<void> {
+    const ok = await idbPut('usage', this.usage, IDB_META_STORE);
+    if (!ok) {
+      try {
+        localStorage.setItem(MAGGI_USAGE_KEY, JSON.stringify(this.usage));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private async persistSavedQueriesLocal(): Promise<void> {
+    const ok = await idbPut('list', this.savedQueries, IDB_SAVED_STORE);
+    try {
+      localStorage.setItem(MAGGI_SAVED_QUERIES_KEY, JSON.stringify(this.savedQueries));
+    } catch {
+      if (!ok) console.warn('[MAGGI] Could not persist saved queries.');
     }
   }
 
@@ -232,7 +383,160 @@ export class MaggiStore {
   updateSettings(patch: Partial<MaggiSettings>): MaggiSettings {
     this.settings = { ...this.settings, ...patch };
     saveMaggiSettings(this.settings);
+    this.notify();
     return this.settings;
+  }
+
+  // --- chat persistence ----------------------------------------------------
+
+  getChatMessages(): PersistedMaggiMessage[] {
+    return [...this.chatMessages];
+  }
+
+  async saveChatMessages(msgs: PersistedMaggiMessage[]): Promise<void> {
+    const trimmed = msgs.slice(-150).map((m) => ({
+      ...m,
+      // Keep stored retrieval lean by omitting giant contextBlock text if very large
+      retrieval: m.retrieval
+        ? {
+            ...m.retrieval,
+            contextBlock: m.retrieval.contextBlock?.slice(0, 12000) || '',
+          }
+        : undefined,
+    }));
+    this.chatMessages = trimmed;
+    const ok = await idbPut('history', trimmed, IDB_CHAT_STORE);
+    try {
+      // Store compact mirror without heavy retrieval chunks in localStorage
+      const compact = trimmed.map(({ retrieval: _r, ...rest }) => rest);
+      localStorage.setItem(MAGGI_CHAT_KEY, JSON.stringify(compact));
+    } catch {
+      if (!ok) console.warn('[MAGGI] Could not persist chat messages.');
+    }
+    this.notify();
+  }
+
+  async clearChatMessages(): Promise<void> {
+    this.chatMessages = [];
+    await idbPut('history', [], IDB_CHAT_STORE);
+    try {
+      localStorage.removeItem(MAGGI_CHAT_KEY);
+    } catch {
+      /* ignore */
+    }
+    this.notify();
+  }
+
+  // --- saved queries persistence -------------------------------------------
+
+  listSavedQueries(): SavedMaggiQuery[] {
+    return sortSavedQueries(this.savedQueries);
+  }
+
+  async saveQuery(input: {
+    id?: string;
+    title?: string;
+    query: string;
+    answer: string;
+    citations?: Citation[];
+    retrieval?: RetrievedContext;
+    usage?: RagAnswer['usage'];
+    workspaceName?: string;
+    pinned?: boolean;
+  }): Promise<SavedMaggiQuery> {
+    await this.hydrate();
+    const now = Date.now();
+    const cleanQuery = input.query.trim();
+    const cleanAnswer = input.answer.trim();
+
+    const existing = this.savedQueries.find(
+      (q) =>
+        (input.id && q.id === input.id) ||
+        (q.query.trim() === cleanQuery && q.answer.trim() === cleanAnswer),
+    );
+
+    const docNames = input.retrieval
+      ? Array.from(new Set(input.retrieval.chunks.map((c) => c.chunk.docName))).slice(0, 12)
+      : Array.from(new Set((input.citations ?? []).map((c) => c.docName))).slice(0, 12);
+
+    const saved: SavedMaggiQuery = {
+      id: existing?.id || input.id || `mq-${now}-${Math.random().toString(36).slice(2, 7)}`,
+      title: (input.title || existing?.title || defaultQueryTitle(cleanQuery)).trim(),
+      query: cleanQuery,
+      answer: cleanAnswer,
+      pinned: input.pinned ?? existing?.pinned ?? false,
+      workspaceName: input.workspaceName ?? existing?.workspaceName,
+      citations: input.citations ?? existing?.citations ?? [],
+      retrieval: input.retrieval
+        ? {
+            tokens: input.retrieval.tokens,
+            latencyMs: input.retrieval.latencyMs,
+            trace: input.retrieval.trace,
+            chunkCount: input.retrieval.chunks.length,
+            docNames,
+          }
+        : existing?.retrieval,
+      usage: input.usage ?? existing?.usage,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    const next = existing
+      ? this.savedQueries.map((q) => (q.id === existing.id ? saved : q))
+      : [saved, ...this.savedQueries];
+    this.savedQueries = sortSavedQueries(next);
+    await this.persistSavedQueriesLocal();
+    this.notify();
+
+    void getCloudQueryStorage().then((cloud) => cloud?.syncSavedQueryToFirestore(saved, Boolean(existing)));
+    return saved;
+  }
+
+  async updateSavedQuery(
+    id: string,
+    patch: { title?: string; pinned?: boolean },
+  ): Promise<SavedMaggiQuery | null> {
+    await this.hydrate();
+    const target = this.savedQueries.find((q) => q.id === id);
+    if (!target) return null;
+
+    const updated: SavedMaggiQuery = {
+      ...target,
+      ...(patch.title !== undefined ? { title: patch.title.trim() || defaultQueryTitle(target.query) } : {}),
+      ...(patch.pinned !== undefined ? { pinned: patch.pinned } : {}),
+      updatedAt: Date.now(),
+    };
+
+    this.savedQueries = sortSavedQueries(this.savedQueries.map((q) => (q.id === id ? updated : q)));
+    await this.persistSavedQueriesLocal();
+    this.notify();
+
+    void getCloudQueryStorage().then((cloud) => cloud?.syncSavedQueryToFirestore(updated, true));
+    return updated;
+  }
+
+  async deleteSavedQuery(id: string): Promise<void> {
+    await this.hydrate();
+    this.savedQueries = this.savedQueries.filter((q) => q.id !== id);
+    await this.persistSavedQueriesLocal();
+    this.notify();
+
+    void getCloudQueryStorage().then((cloud) => cloud?.deleteSavedQueryFromFirestore(id));
+  }
+
+  async clearSavedQueries(): Promise<void> {
+    await this.hydrate();
+    const ids = this.savedQueries.map((q) => q.id);
+    this.savedQueries = [];
+    await this.persistSavedQueriesLocal();
+    this.notify();
+
+    void getCloudQueryStorage().then((cloud) => {
+      if (!cloud) return;
+      ids.forEach((id) => {
+        void cloud.deleteSavedQueryFromFirestore(id);
+      });
+    });
   }
 
   private embedConfig(): EmbedConfig {
@@ -241,7 +545,7 @@ export class MaggiStore {
       geminiModel: this.settings.embeddingModel,
       freeLlmApiBaseUrl: this.settings.freeLlmApiBaseUrl,
       freeLlmApiKey: this.settings.freeLlmApiKey,
-      preferFreeLlm: this.settings.provider === 'freellmapi',
+      preferFreeLlm: this.settings.provider === 'freellmapi' && this.settings.freeLlmMode !== 'keypool',
     };
   }
 
@@ -359,6 +663,7 @@ export class MaggiStore {
 
     onProgress?.({ stage: 'done', name: '', done: total, total });
     await this.persist();
+    this.notify();
     return outcomes;
   }
 
@@ -395,6 +700,7 @@ export class MaggiStore {
   async removeDocument(docId: string): Promise<void> {
     this.removeDocumentInternal(docId);
     await this.persist();
+    this.notify();
   }
 
   async clear(): Promise<void> {
@@ -404,12 +710,16 @@ export class MaggiStore {
     this.chunkIndex.clear();
     this.vectorBackend = 'none';
     this.usage = { ...EMPTY_USAGE };
-    await idbPut('index', null);
+    await idbPut('index', null, IDB_STORE);
+    await idbPut('usage', this.usage, IDB_META_STORE);
+    await this.clearChatMessages();
     try {
       localStorage.removeItem(MAGGI_INDEX_KEY);
+      localStorage.removeItem(MAGGI_USAGE_KEY);
     } catch {
       /* ignore */
     }
+    this.notify();
   }
 
   // --- inspection ----------------------------------------------------------
@@ -595,6 +905,8 @@ export class MaggiStore {
     this.usage.totalCompletionTokens += result.usage?.completionTokens ?? estimateTokens(result.text);
     this.usage.byProvider[result.provider] = (this.usage.byProvider[result.provider] ?? 0) + 1;
     this.usage.lastRoutedVia = result.routedVia;
+    await this.persistUsage();
+    this.notify();
 
     return {
       answer: result.text,
@@ -652,3 +964,4 @@ export const getMaggiStore = (settings?: MaggiSettings): MaggiStore => {
   else if (settings) singleton.updateSettings(settings);
   return singleton;
 };
+

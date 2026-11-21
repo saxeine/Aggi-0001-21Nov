@@ -49,6 +49,39 @@ export interface MaggiBrain {
   probe: () => Promise<{ ok: boolean; detail: string; models?: string[] }>;
 }
 
+const normaliseBaseUrl = (url: string): string => {
+  let cleaned = (url || '').replace(/\s+/g, '').replace(/\/+$/, '');
+  if (!cleaned) return '';
+  cleaned = cleaned.replace(/^(https?):\/([^/])/i, '$1://$2');
+  if (!/^https?:\/\//i.test(cleaned)) {
+    const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(cleaned);
+    cleaned = `${isLocal || /:\d+/.test(cleaned) ? 'http' : 'https'}://${cleaned}`;
+  }
+  cleaned = cleaned
+    .replace(/\/(chat\/completions|completions|embeddings|models)$/i, '')
+    .replace(/\/+$/, '');
+  if (!/\/v\d+(\.\d+)?$/i.test(cleaned) && !cleaned.toLowerCase().endsWith('/v1')) {
+    cleaned = `${cleaned}/v1`;
+  }
+  return cleaned;
+};
+
+const isLoopbackUrl = (url: string): boolean => {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+};
+
+const formatLoopbackBrowserError = (baseUrl: string, err: unknown): string => {
+  const msg = err instanceof Error ? err.message : String(err);
+  return `Could not reach ${baseUrl} from the cloud server or directly from your browser (${msg}). `
+    + `Make sure FreeLLMAPI is running on that port with CORS enabled, or expose it with an HTTPS tunnel `
+    + `(e.g. \`cloudflared tunnel --url ${baseUrl.replace(/\/v1$/i, '')}\`) and paste the https:// URL in Base URL.`;
+};
+
 const postJson = async (url: string, body: unknown, signal?: AbortSignal) => {
   const res = await fetch(url, {
     method: 'POST',
@@ -58,7 +91,11 @@ const postJson = async (url: string, body: unknown, signal?: AbortSignal) => {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 400) || res.statusText}`);
+    let parsed: any = null;
+    try { parsed = JSON.parse(text); } catch { /* raw text */ }
+    const err = new Error(parsed?.error || `HTTP ${res.status}: ${text.slice(0, 400) || res.statusText}`) as Error & { code?: string };
+    if (parsed?.code) err.code = parsed.code;
+    throw err;
   }
   return res;
 };
@@ -82,20 +119,33 @@ const buildPayload = (settings: MaggiSettings, messages: ChatMessage[], opts: Co
   };
 
   if (provider === 'freellmapi') {
-    payload.baseUrl = settings.freeLlmApiBaseUrl;
-    payload.apiKey = settings.freeLlmApiKey;
+    const mode = settings.freeLlmMode || (settings.freeLlmKeys?.length ? 'keypool' : 'url');
+    payload.freeLlmMode = mode;
+    if (mode === 'keypool') {
+      payload.keyPool = settings.freeLlmKeys || [];
+    } else {
+      payload.baseUrl = normaliseBaseUrl(settings.freeLlmApiBaseUrl);
+      payload.apiKey = settings.freeLlmApiKey.trim();
+    }
     payload.model = opts.model || settings.freeLlmApiModel || 'auto';
   } else if (provider === 'openai') {
-    payload.baseUrl = settings.openAiBaseUrl;
-    payload.apiKey = settings.openAiApiKey;
+    payload.baseUrl = normaliseBaseUrl(settings.openAiBaseUrl);
+    payload.apiKey = settings.openAiApiKey.trim();
     payload.model = opts.model || settings.openAiModel;
   } else if (provider === 'ollama') {
-    payload.baseUrl = settings.ollamaBaseUrl;
+    payload.baseUrl = settings.ollamaBaseUrl.replace(/\s+/g, '').replace(/\/+$/, '');
     payload.model = opts.model || settings.ollamaModel;
   } else {
     payload.model = opts.model || settings.geminiModel;
   }
   return payload;
+};
+
+const isLoopbackFallbackCandidate = (err: unknown, baseUrl?: string): boolean => {
+  if (!baseUrl || !isLoopbackUrl(baseUrl)) return false;
+  const code = (err as any)?.code || '';
+  const msg = err instanceof Error ? err.message : String(err);
+  return code === 'LOOPBACK_UNREACHABLE' || /ECONNREFUSED|LOOPBACK_UNREACHABLE|fetch failed|not reach/i.test(msg);
 };
 
 export const createBrain = (settings: MaggiSettings): MaggiBrain => {
@@ -105,8 +155,51 @@ export const createBrain = (settings: MaggiSettings): MaggiBrain => {
   const complete = async (messages: ChatMessage[], opts: CompletionOptions = {}): Promise<CompletionResult> => {
     const started = performance.now();
     const payload = buildPayload(settings, messages, opts);
-    const res = await postJson('/api/maggi/chat', payload, opts.signal);
-    const data = await res.json();
+    const normProvider = payload.provider as string;
+    const targetBase = typeof payload.baseUrl === 'string' ? payload.baseUrl : undefined;
+    const targetKey = typeof payload.apiKey === 'string' ? payload.apiKey : '';
+
+    let data: any;
+    let headerRoutedVia: string | undefined;
+
+    try {
+      const res = await postJson('/api/maggi/chat', payload, opts.signal);
+      headerRoutedVia = res.headers.get('x-routed-via') || undefined;
+      data = await res.json();
+    } catch (proxyErr) {
+      if ((normProvider === 'freellmapi' || normProvider === 'openai') && isLoopbackFallbackCandidate(proxyErr, targetBase)) {
+        try {
+          const directRes = await fetch(`${targetBase}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(targetKey ? { Authorization: `Bearer ${targetKey}` } : {}),
+            },
+            body: JSON.stringify({
+              model: payload.model || 'auto',
+              messages,
+              temperature: payload.temperature,
+              max_tokens: payload.maxTokens,
+              stream: false,
+            }),
+            signal: opts.signal,
+          });
+          if (!directRes.ok) {
+            const raw = await directRes.text().catch(() => '');
+            throw new Error(`HTTP ${directRes.status}: ${raw.slice(0, 300) || directRes.statusText}`);
+          }
+          headerRoutedVia = directRes.headers.get('x-routed-via') || undefined;
+          data = await directRes.json();
+        } catch (directErr) {
+          if (directErr instanceof TypeError) {
+            throw new Error(formatLoopbackBrowserError(targetBase!, directErr));
+          }
+          throw directErr;
+        }
+      } else {
+        throw proxyErr;
+      }
+    }
 
     // The /api/maggi/chat route returns a normalised {text,...} envelope, but
     // tolerate a raw OpenAI/Chat shape too in case the endpoint is pointed
@@ -123,7 +216,7 @@ export const createBrain = (settings: MaggiSettings): MaggiBrain => {
       text: text.trim(),
       provider,
       model: data.model || String(payload.model || ''),
-      routedVia: data.routedVia || data.routed_via || res.headers.get('x-routed-via') || undefined,
+      routedVia: data.routedVia || data.routed_via || headerRoutedVia,
       usage: data.usage
         ? {
           promptTokens: data.usage.promptTokens ?? data.usage.prompt_tokens,
@@ -141,12 +234,52 @@ export const createBrain = (settings: MaggiSettings): MaggiBrain => {
   ): Promise<CompletionResult> => {
     const started = performance.now();
     const payload: Record<string, unknown> = { ...buildPayload(settings, messages, opts), stream: true };
-    const res = await fetch('/api/maggi/chat-stream', {
+    const normProvider = payload.provider as string;
+    const targetBase = typeof payload.baseUrl === 'string' ? payload.baseUrl : undefined;
+    const targetKey = typeof payload.apiKey === 'string' ? payload.apiKey : '';
+
+    let res = await fetch('/api/maggi/chat-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: opts.signal,
     });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let parsed: any = null;
+      try { parsed = JSON.parse(text); } catch { /* raw text */ }
+
+      if (
+        (normProvider === 'freellmapi' || normProvider === 'openai')
+        && targetBase
+        && isLoopbackUrl(targetBase)
+        && (parsed?.code === 'LOOPBACK_UNREACHABLE' || /ECONNREFUSED|LOOPBACK_UNREACHABLE|fetch failed/i.test(text))
+      ) {
+        try {
+          res = await fetch(`${targetBase}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(targetKey ? { Authorization: `Bearer ${targetKey}` } : {}),
+            },
+            body: JSON.stringify({
+              model: payload.model || 'auto',
+              messages,
+              temperature: payload.temperature,
+              max_tokens: payload.maxTokens,
+              stream: true,
+            }),
+            signal: opts.signal,
+          });
+        } catch (directErr) {
+          throw new Error(formatLoopbackBrowserError(targetBase, directErr));
+        }
+      } else {
+        throw new Error(`Stream failed (${res.status}): ${parsed?.error || text.slice(0, 300)}`);
+      }
+    }
+
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => '');
       throw new Error(`Stream failed (${res.status}): ${text.slice(0, 300)}`);
@@ -157,7 +290,7 @@ export const createBrain = (settings: MaggiSettings): MaggiBrain => {
     let buffer = '';
     let full = '';
     let model = String(payload.model || '');
-    let routedVia: string | undefined;
+    let routedVia: string | undefined = res.headers.get('x-routed-via') || undefined;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -196,18 +329,52 @@ export const createBrain = (settings: MaggiSettings): MaggiBrain => {
   };
 
   const probe = async () => {
+    const normProvider = normaliseProvider(provider);
+    const mode = normProvider === 'freellmapi'
+      ? (settings.freeLlmMode || (settings.freeLlmKeys?.length ? 'keypool' : 'url'))
+      : 'url';
+    const rawBase = provider === 'freellmapi' && mode !== 'keypool' ? settings.freeLlmApiBaseUrl
+      : provider === 'openai-compatible' ? settings.openAiBaseUrl
+        : provider === 'ollama' ? settings.ollamaBaseUrl : undefined;
+    const cleanBase = rawBase
+      ? (normProvider === 'ollama' ? rawBase.replace(/\s+/g, '').replace(/\/+$/, '') : normaliseBaseUrl(rawBase))
+      : undefined;
+    const cleanKey = (provider === 'freellmapi' && mode !== 'keypool' ? settings.freeLlmApiKey
+      : provider === 'openai-compatible' ? settings.openAiApiKey : '').trim();
+
     try {
       const res = await postJson('/api/maggi/probe', {
-        provider: normaliseProvider(provider),
-        baseUrl: provider === 'freellmapi' ? settings.freeLlmApiBaseUrl
-          : provider === 'openai-compatible' ? settings.openAiBaseUrl
-            : provider === 'ollama' ? settings.ollamaBaseUrl : undefined,
-        apiKey: provider === 'freellmapi' ? settings.freeLlmApiKey
-          : provider === 'openai-compatible' ? settings.openAiApiKey : undefined,
+        provider: normProvider,
+        ...(normProvider === 'freellmapi' ? { freeLlmMode: mode, keyPool: mode === 'keypool' ? (settings.freeLlmKeys || []) : undefined } : {}),
+        baseUrl: cleanBase,
+        apiKey: cleanKey || undefined,
         model: provider === 'freellmapi' ? settings.freeLlmApiModel
           : provider === 'openai-compatible' ? settings.openAiModel : settings.ollamaModel,
       });
       const data = await res.json();
+
+      if (!data.ok && mode !== 'keypool' && (normProvider === 'freellmapi' || normProvider === 'openai') && cleanBase && isLoopbackUrl(cleanBase)
+        && (data.code === 'LOOPBACK_UNREACHABLE' || /ECONNREFUSED|LOOPBACK_UNREACHABLE|fetch failed/i.test(data.detail || ''))) {
+        try {
+          const direct = await fetch(`${cleanBase}/models`, {
+            headers: cleanKey ? { Authorization: `Bearer ${cleanKey}` } : {},
+          });
+          if (!direct.ok) {
+            const raw = await direct.text().catch(() => '');
+            return { ok: false, detail: `Local endpoint returned HTTP ${direct.status}: ${raw.slice(0, 200) || direct.statusText}` };
+          }
+          const directJson = await direct.json();
+          const models = (directJson.data ?? directJson.models ?? []).map((m: any) => m.id ?? m.name).filter(Boolean);
+          return {
+            ok: true,
+            detail: `Connected directly from browser — ${models.length} models available${cleanKey ? '' : ' (no key: anonymous providers only)'}`,
+            models: models.slice(0, 200),
+          };
+        } catch (directErr) {
+          return { ok: false, detail: formatLoopbackBrowserError(cleanBase, directErr) };
+        }
+      }
+
       return {
         ok: !!data.ok,
         detail: data.detail || (data.ok ? 'Connected' : 'Unreachable'),
