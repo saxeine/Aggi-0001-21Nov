@@ -165,3 +165,7 @@ export const themeStyles: Record<string, any> = {
     modalBg: 'bg-stone-200 border-stone-300'
   }
 };
+
+export const CREATIVE_STUDIO_THEMES: string[] = [
+  'charcoal', 'silver', 'white', 'cosmic', 'emerald', 'amber', 'cyberpunk', 'slate', 'crimson', 'orchid', 'olive'
+];

@@ -8,7 +8,9 @@ import {
   Eraser, Circle, ArrowRight, Type, Archive, ArrowLeft, ZoomIn, ZoomOut, Camera, Hand, MousePointer
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
+// The pre-bundled CommonJS module only exposes a default export (the saveAs function).
+import FileSaver from 'file-saver';
+const saveAs = FileSaver;
 import { themeStyles } from '../../constants/creativeStudioTheme';
 import { generateUnifiedAIResponse } from '../../services/unifiedAi';
 import { saveDocToFirestore, getDocsFromFirestore, deleteDocFromFirestore } from '../../services/storage';

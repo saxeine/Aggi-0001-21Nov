@@ -1,6 +1,6 @@
 import ToolOrderSettingsModal from './ToolOrderSettingsModal';
 import React, { useState, useEffect, useRef } from 'react';
-import { themeStyles } from '../constants/creativeStudioTheme';
+import { themeStyles, CREATIVE_STUDIO_THEMES } from '../constants/creativeStudioTheme';
 import { saveUserPreference, loadUserPreference } from '../services/storage';
 import { SegCarverTool } from './CreationStudio/SegCarverTool';
 import { ScriptWriter } from './CreationStudio/ScriptWriter';
@@ -56,7 +56,7 @@ export const MediaSuiteView: React.FC<{
   const [ytDuration, setYtDuration] = useState('3');
   const hasActiveSession = !!session;
   
-  const themes = ['charcoal', 'silver', 'white', 'cosmic', 'emerald', 'amber', 'cyberpunk', 'slate', 'crimson', 'orchid', 'olive'];
+  const themes = CREATIVE_STUDIO_THEMES;
   const [localTheme, setLocalTheme] = useState(() => {
     const saved = localStorage.getItem('creative_studio_theme');
     return saved && themes.includes(saved) ? saved : 'charcoal';
@@ -764,7 +764,7 @@ export const MediaSuiteView: React.FC<{
         onCycleViewMode={handleViewModeChange}
         themeLabel={`Theme: ${localTheme}`}
         onCycleTheme={() => {
-           const themes = ['charcoal', 'silver', 'white', 'cosmic', 'emerald', 'amber', 'cyberpunk', 'slate', 'crimson', 'orchid', 'olive'];
+           const themes = CREATIVE_STUDIO_THEMES;
            const nextIndex = (themes.indexOf(localTheme) + 1) % themes.length;
            const nextTheme = themes[nextIndex];
            setLocalTheme(nextTheme);

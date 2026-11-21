@@ -26,7 +26,11 @@ import { useCastLibrary } from './hooks/useCastLibrary';
 import { useCharacterLibrary } from './hooks/useCharacterLibrary';
 import { generateResponse, generateSpeech, searchWeb, chunkText, base64ToText, translateText } from './services/gemini'; 
 import { generateUnifiedAIResponse } from './services/unifiedAi';
-import { saveAudioBlobToIDB, loadAudioBlobFromIDB } from './services/storage';
+import { buildToolPrompt } from './utils/toolPrompts';
+import { buildAudioPlayerHtml, buildAudioNoticeHtml, buildPodcastDocumentHtml, buildErrorHtml } from './utils/podcastHtml';
+import { loadAudioBlobFromIDB } from './services/storage';
+import { saveGlobalHistorySafely } from './services/historyStorage';
+import { savePodcastToHistory } from './utils/podcastHistory';
 import { getMaggiStore } from './services/maggi/store';
 import { DEFAULT_GEMINI_MODEL } from './constants/geminiModels';
 
@@ -320,74 +324,6 @@ const App: React.FC = () => {
       }
   };
 
-  const saveGlobalHistorySafely = (history: any[]) => {
-      if (!Array.isArray(history)) return;
-
-      // 1. Asynchronously persist full audio data to IndexedDB so large WAV blobs are never lost
-      history.forEach(item => {
-          if (item?.id && item?.data && typeof item.data === 'string' && item.data.length > 500) {
-              saveAudioBlobToIDB(item.id, item.data, item.scriptHtml).catch(() => {});
-          }
-      });
-
-      // 2. Prepare lightweight history for localStorage (strip heavy base64 strings)
-      // localStorage has a strict ~5MB origin quota. Large audio WAVs (1-10MB) must NOT be stored directly in localStorage.
-      const sanitizeItem = (item: any, keepData = false) => ({
-          ...item,
-          data: keepData && item.data && typeof item.data === 'string' && item.data.length < 50000 ? item.data : undefined,
-          hasAudioData: !!(item.data || item.file),
-          scriptHtml: item.scriptHtml && typeof item.scriptHtml === 'string' && item.scriptHtml.length > 2000 
-              ? item.scriptHtml.substring(0, 1000) + '<!-- truncated for storage -->' 
-              : item.scriptHtml
-      });
-
-      // Tier 1: Try saving sanitized history (keeping only light metadata for items)
-      try {
-          const sanitized = history.slice(0, 30).map((item, idx) => sanitizeItem(item, idx === 0));
-          localStorage.setItem('global_podcast_history', JSON.stringify(sanitized));
-          window.dispatchEvent(new Event('global_podcast_history_updated'));
-          return;
-      } catch (e1) {
-          console.warn("Storage quota exceeded in Tier 1. Stripping all audio payloads from localStorage history...");
-      }
-
-      // Tier 2: Strip ALL data and truncate scriptHtml for all items
-      try {
-          const minimal = history.slice(0, 15).map(item => ({
-              id: item.id,
-              type: item.type,
-              name: item.name,
-              mimeType: item.mimeType,
-              hasAudioData: true,
-              scriptHtml: item.scriptHtml && typeof item.scriptHtml === 'string' ? item.scriptHtml.substring(0, 300) : undefined
-          }));
-          localStorage.setItem('global_podcast_history', JSON.stringify(minimal));
-          window.dispatchEvent(new Event('global_podcast_history_updated'));
-          return;
-      } catch (e2) {
-          console.warn("Storage quota exceeded in Tier 2. Keeping top 5 minimal records...");
-      }
-
-      // Tier 3: Keep only top 5 lightweight metadata records
-      try {
-          const ultraMinimal = history.slice(0, 5).map(item => ({
-              id: item.id,
-              type: item.type,
-              name: item.name,
-              mimeType: item.mimeType,
-              hasAudioData: true
-          }));
-          localStorage.setItem('global_podcast_history', JSON.stringify(ultraMinimal));
-          window.dispatchEvent(new Event('global_podcast_history_updated'));
-      } catch (e3) {
-          // Tier 4: Clear older non-critical keys if completely blocked
-          try {
-              localStorage.removeItem('global_podcast_history');
-          } catch (e4) {
-              /* completely silent failover to prevent unhandled crash */
-          }
-      }
-  };
 
   const onRemoveMedia = (id: string) => {
       const result = handleRemoveMedia(id);
@@ -613,280 +549,11 @@ const App: React.FC = () => {
              }
          ];
      }
-     let prompt = "";
-     let isPodcast = false;
-     switch(toolId) {
-         case 'text_summarizer':
-             const action = payload?.action || 'summarize';
-             const lang = payload?.lang || 'swedish';
-             
-             let instruction = '';
-             if (action === 'summarize') {
-                 instruction = `Provide a comprehensive summary of the provided text.`;
-             } else if (action === 'translate') {
-                 instruction = `Translate the provided text into ${lang}.`;
-             } else if (action === 'summarize_translate') {
-                 instruction = `Provide a comprehensive summary of the provided text, and translate the summary into ${lang}.`;
-             }
+     const { prompt, isPodcast } = buildToolPrompt(toolId, payload, voiceSettings);
 
-             prompt = `Act as a professional linguist and analyst.
-             
-             TASK: ${instruction}
-             
-             Format the output as a clean, readable HTML document. Use Tailwind CSS for styling. Include clear headings and well-structured paragraphs or bullet points where appropriate.`;
-             break;
-         case 'youtube_transcript':
-             const duration = payload?.duration || 'All';
-             prompt = `Please generate a detailed transcript for the provided source.
-             
-             Target Duration to transcribe: ${duration} minutes.
-             
-             If the source is a YouTube link, use your search capabilities to find the transcript or summarize the video content in detail.
-             If the source is a video or audio file, analyze the media and provide a detailed transcript.
-             
-             Format the output as a clean, readable HTML document with timestamps (e.g., [00:00]) and speaker labels if possible. Use Tailwind CSS for styling.`;
-             break;
-         case 'data_table':
-             const userInstructions = payload?.instructions || "Extract all key numerical data and entities mentioned.";
-             const targetLang = payload?.language || "English";
-             prompt = `Act as a professional Data Architect. Your task is to extract structured information from the provided sources and present it in an analysis-ready Data Table. 
-
-USER EXTRACTION REQUIREMENTS: "${userInstructions}"
-OUTPUT LANGUAGE: "${targetLang}"
-
-CRITICAL REQUIREMENTS:
-1. Identify all relevant rows and columns based on the requirements.
-2. Ensure data is normalized (consistent date formats, units, and naming).
-3. If information is missing for a cell, leave it blank or use "N/A".
-4. FORMAT: Return a self-contained HTML document with an interactive, responsive table styled with Tailwind CSS.
-5. EXPORT FEATURE: YOU MUST include a fixed header with a button that has id="downloadBtn" and text "DOWNLOAD CSV".
-6. JAVASCRIPT: YOU MUST include a <script> block with a function named "downloadCSV" that is called when the button is clicked. Use this exact logic for the CSV generation:
-   function downloadCSV() {
-     const table = document.querySelector('table');
-     let csv = [];
-     for (let i = 0; i < table.rows.length; i++) {
-       let row = [], cols = table.rows[i].cells;
-       for (let j = 0; j < cols.length; j++) {
-         let data = cols[j].innerText.replace(/(\\r\\n|\\n|\\r)/gm, '').replace(/(\\s\\s)/gm, ' ');
-         data = data.replace(/"/g, '""');
-         row.push('"' + data + '"');
-       }
-       csv.push(row.join(','));
-     }
-     const csvContent = csv.join('\\n');
-     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-     const link = document.createElement('a');
-     const url = URL.createObjectURL(blob);
-     link.setAttribute('href', url);
-     link.setAttribute('download', 'extracted_data.csv');
-     link.style.visibility = 'hidden';
-     document.body.appendChild(link);
-     link.click();
-     document.body.removeChild(link);
-   }
-   document.getElementById('downloadBtn').addEventListener('click', downloadCSV);
-
-STYLE: Use a professional, modern layout. Header row should be distinct. Use zebra-striping for rows.`;
-             break;
-         case 'podcast_2':
-             prompt = `Create a detailed script for a 2-person Podcast (${voiceSettings.hostLabel} and ${voiceSettings.expertLabel}) discussing these sources.
-             
-             HOST (${voiceSettings.hostLabel}): ${voiceSettings.hostBio || 'A charismatic and engaging host.'}
-             EXPERT (${voiceSettings.expertLabel}): ${voiceSettings.expertBio || 'A knowledgeable subject matter expert.'}
-             
-             Use a conversational, engaging tone. Target Length: ${voiceSettings.length || 'Medium (3-5 min)'}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:** and **${voiceSettings.expertLabel}:** to denote speakers.`;
-             isPodcast = true;
-             break;
-         case 'podcast_1':
-             prompt = `Create a detailed script for a Single-Host Podcast reporting on these sources.
-             
-             HOST (${voiceSettings.hostLabel}): ${voiceSettings.hostBio || 'A charismatic and engaging host.'}
-             
-             The host '${voiceSettings.hostLabel}' is reporting directly to the audience. Use an engaging, storytelling tone. Target Length: ${voiceSettings.length || 'Medium (3-5 min)'}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:** to denote the speaker.`;
-             isPodcast = true;
-             break;
-         case 'podcast_3':
-             prompt = `Create a detailed script for a 3-person Roundtable Podcast (${voiceSettings.hostLabel}, ${voiceSettings.expertLabel}, and ${voiceSettings.guestLabel}).
-             
-             HOST (${voiceSettings.hostLabel}): ${voiceSettings.hostBio || 'A charismatic and engaging host.'}
-             EXPERT (${voiceSettings.expertLabel}): ${voiceSettings.expertBio || 'A knowledgeable subject matter expert.'}
-             GUEST (${voiceSettings.guestLabel}): ${voiceSettings.guestBio || 'A special guest with a unique perspective.'}
-             
-             It should be a lively, multi-perspective discussion. Target Length: ${voiceSettings.length || 'Medium (3-5 min)'}. Format the output as a Markdown script. Use **${voiceSettings.hostLabel}:**, **${voiceSettings.expertLabel}:**, and **${voiceSettings.guestLabel}:** to denote speakers.`;
-             isPodcast = true;
-             break;
-         case 'faq':
-             prompt = "Analyze the sources and generate a comprehensive FAQ (Frequently Asked Questions). Include at least 10 questions. Format the output as a stylish HTML document with an accordion-like or clear Q&A structure using <details> and <summary> tags if possible, or clear headings.";
-             break;
-         case 'study_guide':
-             prompt = "Create a structured Study Guide based on the selected content. Include Key Terms, Core Concepts, a Summary, and a short Quiz at the end. Format as a professional HTML document with clear sections and styling.";
-             break;
-         case 'timeline':
-             prompt = "Extract all key dates and events from the sources and construct a chronological Timeline. Format this as a vertical HTML timeline with stylish CSS.";
-             break;
-         case 'briefing':
-             prompt = "Write a formal Executive Briefing Document summarizing the key information, risks, opportunities, and strategic insights. Format as a professional HTML document.";
-             break;
-         case 'social_generator':
-             prompt = `Act as a world-class Social Media Strategist. Based on the provided sources, generate a comprehensive Social Media Suite.
-             
-             OUTPUT REQUIREMENTS:
-             1. **LinkedIn Post**: Professional, thought-leadership style, includes 3-5 relevant hashtags.
-             2. **X (Twitter) Thread**: 5-7 engaging tweets that summarize key points and encourage discussion.
-             3. **Instagram Caption**: Visual-first storytelling, punchy, includes emojis and hashtags.
-             
-             FORMAT: Return a clean, beautifully styled HTML document using Tailwind CSS. Use distinct sections for each platform.`;
-             break;
-         case 'quiz_creator':
-             prompt = `Act as an Instructional Designer. Create an interactive Assessment based on the provided sources.
-             
-             OUTPUT REQUIREMENTS:
-             1. **5 Multiple Choice Questions**: With clear explanations for the correct answers.
-             2. **5 Flashcards**: Term on front, definition/context on back.
-             3. **1 Short Essay Prompt**: For deep reflection.
-             
-             FORMAT: Return a self-contained HTML document. Use Tailwind CSS to make it look like a modern learning interface.`;
-             break;
-         case 'crypto_analyst': {
-             const targetCrypto = payload?.crypto || 'XRP';
-             prompt = `Act as an expert cryptocurrency day-trading assistant and technical analyst. Provide a highly granular, intraday technical analysis and scalp-trading blueprint for ${targetCrypto} based on the 4-hour (4H) chart frame. Use a professional, scannable, and practical tone. All monetary values and calculations must be expressed in Swedish Krona (SEK).
-
-SYSTEM INSTRUCTION: You MUST use Google Search to find the CURRENT LIVE DATA for:
-- Current ${targetCrypto} Price in SEK (or calculate from USD using current exchange rate)
-- Current USD/SEK Exchange Rate
-- Recent 4H technical indicators for ${targetCrypto}
-
-Use a Target Scalp Profit goal of 756 SEK for the calculations.
-
-Structure your dashboard with:
-1. **📉 Technical Blueprint:** Entry/Exit levels.
-2. **📈 Capital Requirements Matrix (in SEK):**
-| Target Price Move | ${targetCrypto} Tokens Needed | Total Position Value | Spot (1x Leverage) | 5x Leverage Margin | 10x Leverage Margin | 20x Leverage Margin |
-
-IMPORTANT: Format the entire response as a professional, dark-themed HTML dashboard. Include a <title>Crypto Day-Trading Analysis</title> tag. Use Tailwind CSS for a modern "Trading Terminal" look with emerald and rose accents.
-Return ONLY the HTML code. Do not include any Markdown formatting like \`\`\`html.`;
-             break;
-         }
-         case 'exec_briefing':
-             prompt = `Act as a Chief of Staff. Prepare a high-level Executive Briefing based on the provided sources.
-             
-             OUTPUT REQUIREMENTS:
-             1. **Executive Summary**: 3 sentences maximum.
-             2. **Key Strategic Insights**: 3-5 bullet points.
-             3. **Critical Risks & Opportunities**: A balanced view.
-             4. **Recommended Next Steps**: Clear, actionable items.
-             
-             FORMAT: Return a professional, "one-pager" style HTML document. Use a clean, corporate aesthetic with Tailwind CSS.`;
-             break;
-         case 'brainstormer':
-             prompt = `Act as a Creative Director and Futurist. Your task is to generate 10 "Wild Ideas" or unconventional perspectives based on the provided sources.
-             
-             OUTPUT REQUIREMENTS:
-             - Push the boundaries of the current topic.
-             - Think about "What if?" scenarios.
-             - Connect the topic to unrelated industries or future technologies.
-             
-             FORMAT: Return a vibrant, energetic HTML document using Tailwind CSS. Use a bento-grid style layout for the ideas.`;
-             break;
-         case 'email_drafter':
-             prompt = `Act as a Communications Expert. Draft 3 different email versions based on the provided sources:
-             1. **Professional**: Formal and direct.
-             2. **Persuasive**: Focused on a specific call to action or "sell".
-             3. **Casual/Internal**: Friendly and conversational.
-             
-             FORMAT: Return a clean HTML document with Tailwind CSS. Use clear labels for each version and include subject lines.`;
-             break;
-         case 'marketing_copy':
-             prompt = `Act as a Direct Response Copywriter. Generate high-converting marketing copy based on the provided sources.
-             
-             OUTPUT REQUIREMENTS:
-             1. **3 Catchy Headlines**: Using different psychological triggers.
-             2. **AIDA Framework Copy**: Attention, Interest, Desire, Action.
-             3. **Short Ad Copy**: For Google or Meta ads.
-             
-             FORMAT: Return a professional HTML document with Tailwind CSS. Use bold typography for headlines.`;
-             break;
-         case 'swot_analysis':
-             prompt = `Act as a Strategic Consultant. Perform a detailed SWOT Analysis based on the provided sources.
-             
-             OUTPUT REQUIREMENTS:
-             - **Strengths**: Internal positive attributes.
-             - **Weaknesses**: Internal negative attributes.
-             - **Opportunities**: External positive factors.
-             - **Threats**: External negative factors.
-             
-             FORMAT: Return a clean HTML document with a 2x2 grid layout using Tailwind CSS. Use distinct colors for each quadrant.`;
-             break;
-         case 'code_explainer':
-             prompt = `Act as a Senior Software Engineer. Explain the provided code or technical concepts in simple, plain English.
-             
-             OUTPUT REQUIREMENTS:
-             1. **High-Level Overview**: What does this do?
-             2. **Step-by-Step Breakdown**: Explain the logic.
-             3. **Key Concepts**: Define any technical terms used.
-             
-             FORMAT: Return a clean HTML document with Tailwind CSS. Use code blocks for any code references.`;
-             break;
-         case 'ebook_generator':
-             prompt = `Act as an expert Author and Editor. Based on the selected sources, generate a detailed structural outline for an E-Book, and then draft the first full chapter. Format the output as a professional, deeply-styled HTML document with a cover page layout, Table of Contents, and Chapter 1 content. Use beautiful, modern typography via Tailwind CSS.`;
-             break;
-         case 'image_generator':
-             prompt = `Act as an expert AI Prompt Engineer. Based on the selected sources, generate 5 highly detailed, creative, and evocative prompts that could be used in Midjourney or DALL-E to generate images representing the core concepts. Describe the lighting, camera angle, style, and mood for each. Format as a beautifully styled HTML grid interface.`;
-             break;
-         case 'spreadsheet_creator':
-             prompt = `Act as a Data Analyst. Based on the sources, create a structured spreadsheet layout (columns and rows) containing the key qualitative and quantitative data. Provide it as a beautifully styled HTML table, and suggest 3 Excel/Google Sheets formulas that would be useful for this dataset.`;
-             break;
-         case 'video_script_writer':
-             prompt = `Act as a professional Video Producer. Create a detailed A/V (Audio/Visual) Script based on the provided sources. Include timestamps, specific visual directions, B-roll suggestions, and full narration/voiceover text. Format as a professional split-column HTML script using Tailwind CSS suitable for production.`;
-             break;
-         case 'website_builder':
-             prompt = `Act as a UX/UI Designer and Front-End Developer. Based on the source material, design the layout and write the copy for a high-converting landing page. Output a complete, self-contained HTML document using Tailwind CSS. Include a Hero section, Features/Benefits, and a Call-to-Action. Do not include external dependencies other than Tailwind.`;
-             break;
-         case 'prompt_builder': {
-             const additionalParams = [
-                 payload?.productType ? `- Product Type: ${payload.productType}` : '',
-                 payload?.niche ? `- Niche/Topic: ${payload.niche}` : '',
-                 payload?.skillLevel ? `- Skill Level: ${payload.skillLevel}` : '',
-                 payload?.primaryGoal ? `- Primary Goal: ${payload.primaryGoal}` : '',
-                 payload?.sellingPlatform ? `- Selling Platform: ${payload.sellingPlatform}` : '',
-                 payload?.colorScheme ? `- Color Scheme: ${payload.colorScheme}` : '',
-                 payload?.promotionStrategy ? `- Promotion Strategy: ${payload.promotionStrategy}` : ''
-             ].filter(Boolean).join('\n');
-             const paramsText = additionalParams ? `\n\nADVANCED CONFIGURATION OPTIONS:\n${additionalParams}\n` : '';
-
-             prompt = `Act as an AI Specialist. Analyze the provided ${payload?.isIndependent && !payload?.builderSessionId && !payload?.includeSessionData ? 'topic/instructions' : 'sources'} and create 3 advanced, highly-detailed "System Prompts" or custom instructions that a user could feed into an LLM to interact with this specific knowledge domain. Format output as a stylish HTML document with copyable code blocks and explanations.
-             
-${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\n` : ''}${paramsText}`;
-             break;
-         }
-         case 'content_builder': {
-             const additionalParams = [
-                 payload?.productType ? `- Product Type: ${payload.productType}` : '',
-                 payload?.niche ? `- Niche/Topic: ${payload.niche}` : '',
-                 payload?.skillLevel ? `- Skill Level: ${payload.skillLevel}` : '',
-                 payload?.primaryGoal ? `- Primary Goal: ${payload.primaryGoal}` : '',
-                 payload?.sellingPlatform ? `- Selling Platform: ${payload.sellingPlatform}` : '',
-                 payload?.colorScheme ? `- Color Scheme: ${payload.colorScheme}` : '',
-                 payload?.promotionStrategy ? `- Promotion Strategy: ${payload.promotionStrategy}` : ''
-             ].filter(Boolean).join('\n');
-             const paramsText = additionalParams ? `\n\nADVANCED CONFIGURATION OPTIONS:\n${additionalParams}\n` : '';
-
-             prompt = `Act as an expert Full-Stack Developer and Web Designer. Create a comprehensive, fully functional website code based on the ${payload?.isIndependent && !payload?.builderSessionId && !payload?.includeSessionData ? 'topic/instructions' : 'sources'}. The website MUST feature a top navigation bar with exactly 5 page buttons (Home, About, Services/Products, Content/Gallery, Contact) that use JavaScript to switch between 5 distinct, beautifully styled page views within the single HTML file. Build and launch this with extremely stylish, modern styling using Tailwind CSS. Include a hero section and rich content. Output a complete, self-contained HTML document starting with <!DOCTYPE html>.
-             
-${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\n` : ''}${paramsText}`;
-             break;
-         }
-         default:
-             prompt = "Analyze the content.";
-     }
-     if (isPodcast) {
-         prompt += `\n\nLANGUAGE: ${voiceSettings.language || 'English'}\n\nIMPORTANT: Return ONLY the raw Markdown content. Do not include \`\`\`markdown wrappers.`;
-     } else {
-         prompt += " IMPORTANT: Return ONLY the raw HTML code starting with <!DOCTYPE html>. Ensure it is self-contained with internal CSS.";
-     }
      try {
         const model = settings.model || DEFAULT_GEMINI_MODEL;
-        const cacheName = (toolId === 'youtube_transcript' || toolId === 'text_summarizer') ? undefined : activeSession.geminiCacheName;
+        const cacheName = (toolId === 'youtube_transcript' || toolId === 'text_summarizer') ? undefined : activeSession?.geminiCacheName;
         
         let code = "";
         
@@ -959,74 +626,70 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
         if (isPodcast) {
             code = code.replace(/^```markdown\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
             const rawText = code.replace(/<[^>]*>?/gm, ' ').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-            const speechText = rawText.substring(0, 4000); 
-            let speakers = 1;
-            if (toolId === 'podcast_2') speakers = 2;
-            if (toolId === 'podcast_3') speakers = 3;
-            const audioBase64 = await generateSpeech(speechText, speakers, voiceSettings);
+            const speechText = rawText.substring(0, 4000);
+            const fallbackSpeakers = toolId === 'podcast_2' ? 2 : toolId === 'podcast_3' ? 3 : 1;
+            const payloadSpeakerCount = Number(payload?.speakerCount);
+            const speakers = Number.isFinite(payloadSpeakerCount) && payloadSpeakerCount >= 1 ? payloadSpeakerCount : fallbackSpeakers;
+
+            // Audio is Gemini TTS only. FreeLLMAPI (MAGGI), Ollama and Custom AI
+            // produce text, so report this clearly instead of failing silently.
+            const providerLabel = settings.provider === 'maggi' ? 'FreeLLMAPI (MAGGI)'
+                : settings.provider === 'ollama' ? 'Ollama'
+                : settings.provider === 'custom' ? 'Custom AI'
+                : 'Gemini';
+            let audioBase64: string | null = null;
+            let audioNote = '';
+            if (settings.provider === 'gemini') {
+                try {
+                    audioBase64 = await generateSpeech(speechText, speakers, voiceSettings);
+                } catch (speechErr) {
+                    console.warn('Audio generation failed:', speechErr);
+                }
+                if (!audioBase64) {
+                    audioNote = 'Audio generation failed with the Gemini engine. Your transcript is ready below — you can retry audio from the player.';
+                }
+            } else {
+                audioNote = `Audio (TTS) is not available with the ${providerLabel} brain — it produces text only. Your transcript is ready below; switch Settings → AI Engine to Gemini to generate audio.`;
+            }
             if (audioBase64) {
                 setGeneratedAudio(audioBase64);
             }
-            
+
             // Format the script with color-coded blocks
-            const lines = code.split('\n');
-            let htmlOutput = '<div style="max-width: 800px; margin: 0 auto;">';
-            
-            lines.forEach(line => {
-                const trimmed = line.trim();
-                if (!trimmed) return;
-                
-                let style = 'padding: 16px; margin-bottom: 16px; border-radius: 12px; color: #e2e8f0; line-height: 1.6; font-size: 16px;';
-                
-                // Check for speakers
-                if (trimmed.includes(`**${voiceSettings.hostLabel}:**`) || trimmed.startsWith(`**Host:**`)) {
-                    style += ` background-color: rgba(168, 85, 247, 0.1); border-left: 4px solid #a855f7; box-shadow: 0 2px 10px rgba(168, 85, 247, 0.05);`;
-                } else if (trimmed.includes(`**${voiceSettings.expertLabel}:**`) || trimmed.startsWith(`**Expert:**`)) {
-                    style += ` background-color: rgba(6, 182, 212, 0.1); border-left: 4px solid #06b6d4; box-shadow: 0 2px 10px rgba(6, 182, 212, 0.05);`;
-                } else if (trimmed.includes(`**${voiceSettings.guestLabel}:**`) || trimmed.startsWith(`**Guest:**`)) {
-                    style += ` background-color: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; box-shadow: 0 2px 10px rgba(245, 158, 11, 0.05);`;
-                } else {
-                    // Narrative or other text
-                    style += ` background-color: rgba(30, 41, 59, 0.5); border-left: 4px solid #475569;`;
-                }
-                
-                // Convert markdown bold to html bold
-                const content = trimmed.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #fff; font-weight: 700;">$1</strong>');
-                htmlOutput += `<div style="${style}">${content}</div>`;
+            const audioPlayerHtml = buildAudioPlayerHtml(audioBase64);
+            const audioNoticeHtml = (!audioBase64 && audioNote) ? buildAudioNoticeHtml(audioNote) : '';
+
+            code = buildPodcastDocumentHtml({
+                script: code,
+                voiceSettings,
+                audioBase64,
+                audioNoticeHtml,
+                audioPlayerHtml,
             });
-            htmlOutput += '</div>';
 
-            let audioPlayerHtml = '';
-            if (audioBase64) {
-                audioPlayerHtml = `
-                <div style="background: #1a1a1a; padding: 20px; border-radius: 12px; margin-bottom: 30px; border: 1px solid #333; position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
-                    <h3 style="color: #fff; margin-top: 0; margin-bottom: 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Audio Overview</h3>
-                    <audio controls style="width: 100%;" src="data:audio/wav;base64,${audioBase64}"></audio>
-                </div>`;
-            }
-
-            code = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Podcast Script</title><style>body { font-family: 'Inter', system-ui, -apple-system, sans-serif; padding: 40px 20px; background-color: #0f172a; color: #e2e8f0; } ::selection { background: rgba(168, 85, 247, 0.3); }</style></head><body>${audioPlayerHtml}${htmlOutput}</body></html>`;
-            
-            // Auto save generations to a history library for later retrieval, use, edit/delete
-            if (audioBase64) {
+            // Auto save generations to a history library for later retrieval, use, edit/delete.
+            // The transcript is saved even when audio is unavailable (e.g. a FreeLLMAPI brain).
+            {
                 let formatLabel = "Report Podcast";
                 if (toolId === 'podcast_2') formatLabel = "Dialogue Podcast";
                 if (toolId === 'podcast_3') formatLabel = "Roundtable Podcast";
                 if (toolId === 'podcast_creator') formatLabel = "Interactive Podcast";
-                
+                // Host-only report (multiple speakers configured) — always a single-host report.
+                if (payload?.hostOnly) formatLabel = "Report Podcast";
+
                 const timestamp = new Date().toLocaleString();
-                const filename = `${formatLabel} - ${timestamp}`;
-                
+                const filename = audioBase64 ? `${formatLabel} - ${timestamp}` : `Transcript — ${formatLabel} - ${timestamp}`;
+
                 const newMediaItem: MediaItem = {
                     id: `audio-${Date.now()}`,
                     type: 'audio',
                     name: filename,
                     mimeType: 'audio/wav',
-                    data: audioBase64,
+                    data: audioBase64 || '',
                     scriptHtml: code
                 };
 
-                if (activeSession) {
+                if (audioBase64 && activeSession) {
                     updateActiveSession(s => ({
                         ...s,
                         mediaItems: [newMediaItem, ...s.mediaItems],
@@ -1035,17 +698,10 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
                 }
 
                 // Always save to global history library
-                try {
-                    const savedGlobal = localStorage.getItem('global_podcast_history');
-                    let globalHistory = savedGlobal ? JSON.parse(savedGlobal) : [];
-                    globalHistory = [newMediaItem, ...globalHistory];
-                    saveGlobalHistorySafely(globalHistory);
-                } catch (err) {
-                    console.error("Failed to auto-save to global podcast history:", err);
-                }
+                savePodcastToHistory(newMediaItem);
             }
-            
-            setIsFullWidthPreview(true); 
+
+            setIsFullWidthPreview(true);
         } else {
              // Robust code cleaning for Markdown artifacts
              code = code.replace(/```[hH][tT][mM][lL]\s?([\s\S]*?)```/g, '$1')
@@ -1061,37 +717,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
      } catch (e: any) {
          const msg = e?.message || String(e);
          console.warn("Tool generation notice:", msg);
-         const isQuota = /quota|429|resource_exhausted/i.test(msg);
-         const safeMsg = msg
-           .replace(/&/g, '&amp;')
-           .replace(/</g, '&lt;')
-           .replace(/>/g, '&gt;');
-         const errorHtml = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Generation Notice</title>
-  <style>
-    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #0b0f17; color: #e2e8f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
-    .card { max-width: 560px; width: 100%; background: #141a26; border: 1px solid ${isQuota ? '#f59e0b55' : '#ef444455'}; border-radius: 14px; padding: 22px; }
-    .badge { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 3px 8px; border-radius: 6px; background: ${isQuota ? '#f59e0b22' : '#ef444422'}; color: ${isQuota ? '#fbbf24' : '#f87171'}; margin-bottom: 10px; }
-    h2 { margin: 0 0 8px; font-size: 17px; color: #f8fafc; }
-    p { margin: 0 0 12px; font-size: 13px; line-height: 1.55; color: #cbd5e1; }
-    ul { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.65; color: #94a3b8; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="badge">${isQuota ? 'API Quota Limit' : 'Generation Error'}</div>
-    <h2>${isQuota ? 'Gemini API Quota Exceeded (429)' : 'Could Not Generate Tool Output'}</h2>
-    <p>${safeMsg}</p>
-    <ul>
-      <li>Open <b>Settings → AI Engine</b> and switch to <b>MAGGI</b> (FreeLLMAPI key pool), <b>Ollama</b>, or <b>Custom AI</b>.</li>
-      <li>Or wait a minute and retry, or select a billing-enabled API key in <b>Settings → Secrets</b>.</li>
-    </ul>
-  </div>
-</body>
-</html>`;
+         const errorHtml = buildErrorHtml(msg);
          setPreviewCode(errorHtml);
          setFocusedMediaItem(null);
          setIsPreviewMinimized(false);
@@ -1201,14 +827,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
       }
 
       // Save to global history
-      try {
-          const savedGlobal = localStorage.getItem('global_podcast_history');
-          let globalHistory = savedGlobal ? JSON.parse(savedGlobal) : [];
-          globalHistory = [newMediaItem, ...globalHistory];
-          saveGlobalHistorySafely(globalHistory);
-      } catch (err) {
-          console.error("Failed to save to global podcast history:", err);
-      }
+      savePodcastToHistory(newMediaItem);
 
       alert("Audio added to history library!");
   };
@@ -1264,45 +883,27 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
           if (newScript.includes('Expert:') || newScript.includes(`${voiceSettings.expertLabel}:`)) speakers = 2;
           if (newScript.includes('Guest:') || newScript.includes(`${voiceSettings.guestLabel}:`)) speakers = 3;
           
-          const speechText = newScript.substring(0, 4000); 
-          const audioBase64 = await generateSpeech(speechText, speakers, voiceSettings);
-          if (audioBase64) {
-              setGeneratedAudio(audioBase64);
+          let audioBase64: string | null = null;
+          if (settings.provider === 'gemini') {
+              const speechText = newScript.substring(0, 4000);
+              try {
+                  audioBase64 = await generateSpeech(speechText, speakers, voiceSettings);
+              } catch (speechErr) {
+                  console.warn('Audio regeneration failed:', speechErr);
+              }
+              if (audioBase64) setGeneratedAudio(audioBase64);
+          } else {
+              console.warn('Audio (TTS) is only available with the Gemini engine; the transcript was regenerated but no audio was produced.');
           }
 
           // 2. Update Preview Code (HTML)
-          const lines = newScript.split('\n');
-          let htmlOutput = '<div style="max-width: 800px; margin: 0 auto;">';
-          lines.forEach(line => {
-              const trimmed = line.trim();
-              if (!trimmed) return;
-              let style = 'padding: 16px; margin-bottom: 16px; border-radius: 12px; color: #e2e8f0; line-height: 1.6; font-size: 16px;';
-              
-              if (trimmed.includes(`**${voiceSettings.hostLabel}:**`) || trimmed.startsWith(`**Host:**`) || trimmed.startsWith(`${voiceSettings.hostLabel}:`) || trimmed.startsWith(`Host:`)) {
-                  style += ` background-color: rgba(168, 85, 247, 0.1); border-left: 4px solid #a855f7; box-shadow: 0 2px 10px rgba(168, 85, 247, 0.05);`;
-              } else if (trimmed.includes(`**${voiceSettings.expertLabel}:**`) || trimmed.startsWith(`**Expert:**`) || trimmed.startsWith(`${voiceSettings.expertLabel}:`) || trimmed.startsWith(`Expert:`)) {
-                  style += ` background-color: rgba(6, 182, 212, 0.1); border-left: 4px solid #06b6d4; box-shadow: 0 2px 10px rgba(6, 182, 212, 0.05);`;
-              } else if (trimmed.includes(`**${voiceSettings.guestLabel}:**`) || trimmed.startsWith(`**Guest:**`) || trimmed.startsWith(`${voiceSettings.guestLabel}:`) || trimmed.startsWith(`Guest:`)) {
-                  style += ` background-color: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; box-shadow: 0 2px 10px rgba(245, 158, 11, 0.05);`;
-              } else {
-                  style += ` background-color: rgba(30, 41, 59, 0.5); border-left: 4px solid #475569;`;
-              }
-              
-              const content = trimmed.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #fff; font-weight: 700;">$1</strong>');
-              htmlOutput += `<div style="${style}">${content}</div>`;
+          const code = buildPodcastDocumentHtml({
+              script: newScript,
+              voiceSettings,
+              audioBase64,
+              audioNoticeHtml: '',
+              audioPlayerHtml: buildAudioPlayerHtml(audioBase64),
           });
-          htmlOutput += '</div>';
-          
-          let audioPlayerHtml = '';
-          if (audioBase64) {
-              audioPlayerHtml = `
-              <div style="background: #1a1a1a; padding: 20px; border-radius: 12px; margin-bottom: 30px; border: 1px solid #333; position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
-                  <h3 style="color: #fff; margin-top: 0; margin-bottom: 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Audio Overview</h3>
-                  <audio controls style="width: 100%;" src="data:audio/wav;base64,${audioBase64}"></audio>
-              </div>`;
-          }
-          
-          const code = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Podcast Script</title><style>body { font-family: 'Inter', system-ui, -apple-system, sans-serif; padding: 40px 20px; background-color: #0f172a; color: #e2e8f0; } ::selection { background: rgba(168, 85, 247, 0.3); }</style></head><body>${audioPlayerHtml}${htmlOutput}</body></html>`;
           setPreviewCode(code);
 
       } catch (e) {

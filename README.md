@@ -35,7 +35,8 @@ The application state is centralized in the root `App` component and is structur
     geminiCacheHash?: string; // Signature of the media content cached
   }
   ```
-- **Theme**: Supports `dark` (default), `light`, and `olive`. Persisted in localStorage.
+- **Theme**: The application-level theme supports `dark` (default), `light`, and `olive`. Persisted in localStorage (`gemini_media_aggregator_theme`). This is the [`SettingsPanel`](components/SettingsPanel.tsx) "Theme Mode" control and drives the global `--c-bg-app`/`--c-text-main` CSS variables.
+- **Creative-Studio theme**: the Studio/Media Suite applets honour a second theme system (`creative_studio_theme`) with 11 palettes — `charcoal` (default), `silver`, `white`, `cosmic`, `emerald`, `amber`, `cyberpunk`, `slate`, `crimson`, `orchid`, `olive` — defined in `constants/creativeStudioTheme.ts` and cycled from the app header (`creative_studio_theme_change` window event keeps the choice in sync across tools).
 - **ThemeSettings**: 
   - `bgBrightness`: 20-100% slider.
   - `textBrightness`: 50-150% slider.
@@ -50,9 +51,10 @@ The application state is centralized in the root `App` component and is structur
   - `customApiKey`: API key for Custom AI provider.
   - `customModelName`: Selected model name (e.g. gpt-4o).
   - `customApiPath`: API path (default /v1/chat/completions).
-- **Persistence**: 
-  - **IndexedDB**: Used for storing `sessions` (Media, Chat History) to overcome LocalStorage quota limits (approx 5MB). Handled via `services/storage.ts`.
-  - **LocalStorage**: Used for lightweight preferences like `theme` and `settings`.
+- **Persistence**:
+  - **IndexedDB**: Used for storing `sessions` (Media, Chat History) to overcome LocalStorage quota limits (approx 5MB) and for large audio blobs. Handled via `services/storage.ts`.
+  - **LocalStorage**: Used for lightweight preferences like `theme` and `settings`. **Sensitive keys (Gemini/Custom AI keys, GitHub tokens) are NEVER persisted** — `hooks/useThemeEngine.ts` strips them on save and forces them empty on load; `GitHubPublisherTool` keeps its token in memory only for the session.
+  - **Global podcast history**: lightweight (audio blobs live in IndexedDB); see `services/historyStorage.ts` (tiered localStorage fallback so large WAVs never blow the 5MB quota).
 - **Active Session**: The app tracks an `activeSessionId`. All uploads and chats occur within the context of the active session.
 - **Split View State**: Tracks `previewCode` (for artifacts) or `focusedMediaItem` (for media) to render a split-screen pane.
 
@@ -61,7 +63,7 @@ The app uses an abstraction layer in `App.tsx` to route requests to the correct 
 
 #### `services/gemini.ts`
 Interacts directly with the Google GenAI API.
-- **Model**: Selects between `gemini-3.5-flash` (balanced), `gemini-3.1-pro-preview` (complex reasoning), and `gemini-3.1-flash-lite` (lightweight fast response).
+- **Models**: The catalog lives in `constants/geminiModels.ts` (`DEFAULT_GEMINI_MODEL` = `gemini-4-hydrogen`). Text/balanced: `gemini-4-hydrogen`; reasoning: `gemini-4-neon`; image/video: `gemini-4-argon`, `gemini-4-carbon`; lightweight: `gemini-3.1-flash-lite`; preview: `gemini-3.1-pro-preview`. Legacy names in the request are normalized server-side (`normalizeModel` in `server/gemini.ts`).
 - **Tools**: Uses `googleSearch` tool for resolving Web Link media items.
 - **Context Caching**: Implements `ai.caches.create` to store large media contexts on the server for 10 minutes (TTL), reducing token costs for subsequent queries.
 - **Capabilities**: Supports Text, Images, PDF, Video, Audio.
@@ -75,7 +77,8 @@ Interacts with a local Ollama instance via Fetch API.
 
 #### `services/customAi.ts`
 Interacts with custom OpenAI-compatible endpoints securely.
-- **Connection**: Proxied through `/api/custom-ai` on the local backend server to bypass client-side CORS issues and protect secrets.
+- **Connection**: Proxied through `/api/custom-ai` on the server. The key is sent **per request via the `x-custom-ai-key` header** (never in the JSON body, never persisted) — the same per-session pattern as the Gemini proxy routes.
+- **Server-side guard**: `/api/custom-ai` blocks private/loopback hosts (SSRF protection mirroring `server/maggi/keyPool.ts`) and rejects non-http(s) URLs.
 - **Capabilities**: Embeds text contents, Web Links, and document metadata as part of the prompt context messages.
 - **Endpoints**: Configured via settings (`customBaseUrl`, `customApiPath`, `customModelName`, `customApiKey`).
 
@@ -97,6 +100,16 @@ Unified provider-agnostic bridge used by interactive Creation Studio applets.
 - **CSS Variables**: Injected into `:root` (e.g., `--c-bg-app`, `--c-text-main`).
 - **Transparency**: The engine supports 8-digit Hex codes to allow transparent backgrounds (e.g., for the "Olive" theme's glass effect).
 
+### 3.1 Server Architecture (Node + Express)
+`server.ts` is now a thin wiring layer. Route groups live in dedicated modules:
+- `server/security.ts` — security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS in production) and a per-IP fixed-window rate limiter.
+- `server/gemini.ts` — Gemini client, retry queue, model normalization, `/api/gemini/*`, `/api/custom-ai`, `/api/architecture`.
+- `server/ollamaProxy.ts` — `/api/ollama/*` tunnel proxy with endpoint validation (loopback/private hosts blocked).
+- `server/crypto.ts` — `/api/crypto/*` (prices/info/OHLC/SEK/news) with CoinGecko caching + resilient fallbacks.
+- `server/maggiRoutes.ts` + `server/maggi/keyPool.ts` — MAGGI RAG engine routes; key-pool/model-resolution logic is extracted into `server/maggi/keyPool.ts`.
+
+**Rate limits** (per IP): `/api/gemini/*` 30/min, `/api/custom-ai` 30/min, `/api/maggi/*` 60/min, `/api/ollama/*` 40/min, `/api/crypto/*` 30/min, `/api/architecture` 120/min.
+
 ### 4. Component Structure
 - **Layout**: Main container with a responsive split-pane design (Sidebar + Main Chat + Optional Preview Pane).
 - **SessionModal**:
@@ -105,7 +118,7 @@ Unified provider-agnostic bridge used by interactive Creation Studio applets.
 - **MediaPanel (Sidebar)**:
     - **Settings Drawer**: A slide-up panel containing:
         - Icon-based Theme Switcher (Sun/Moon/Leaf).
-        - **AI Provider**: Toggle between Gemini and Ollama.
+        - **AI Provider**: Toggle between Gemini, MAGGI (FreeLLMAPI), Ollama, and Custom AI.
         - **Model Config**: Dropdowns/Inputs specific to the selected provider.
         - **Context Caching**: Toggle for Gemini server-side caching.
         - **Color Tint Slider**: 0-360 degree hue rotation with rainbow gradient.
@@ -285,6 +298,8 @@ Unified provider-agnostic bridge used by interactive Creation Studio applets.
 - **Application infographic**: `docs/application-infographic.html` is a standalone, printable and searchable visual overview of the session workflow, suite launcher tools, AI routes and persistence. It is based on the current code snapshot; update its tool directory and caveats when the underlying architecture or launchers change.
 
 **Last Updated**: `2026-11-21 00:00:00+01:00`
+- **Testing & CI**: `npm test` runs Vitest unit tests (`tests/`: podcast gating, history storage, tool prompts, podcast HTML, MAGGI key pool). `npm run lint` typechecks (strict mode). GitHub Actions (`.github/workflows/ci.yml`) runs install → lint → test → build on every push/PR.
+
 - **MAGGI — RAG engine rebuilt, with FreeLLMAPI as the brain**:
   - New top-level engine (`services/maggi/`, `components/MaggiView.tsx`, `hooks/useMaggi.ts`, `server/maggiRoutes.ts`) reachable from the library header via the **🧠** button. Full design doc: [`aDOCS/MAGGI.md`](aDOCS/MAGGI.md).
   - **Why**: the previous retrieval layer packed every session media item into one prompt (300k-char truncation) or a single Gemini context cache. That has no ranking, no citations and silently drops content. MAGGI replaces it with a real pipeline — extract → chunk → embed → index → hybrid retrieve → grounded generate → cite. The old path is untouched, so nothing regresses.

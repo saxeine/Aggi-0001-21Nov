@@ -79,8 +79,8 @@ export function recordAnimatic(options: RecordOptions): Promise<RecordResult> {
         audioEl = new Audio();
         audioEl.src = project.audio.url;
         audioEl.volume = project.audio.volume ?? 1;
-        const source = audioCtx.createMediaElementSource(audioEl);
-        const destination = audioCtx.createMediaStreamDestination();
+        const source = audioCtx!.createMediaElementSource(audioEl);
+        const destination = audioCtx!.createMediaStreamDestination();
         source.connect(destination);
         destination.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
         withAudio = true;

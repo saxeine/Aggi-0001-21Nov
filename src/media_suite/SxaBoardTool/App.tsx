@@ -9,20 +9,19 @@ import {
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { jsPDF } from 'jspdf';
-import UploadModal from './components/UploadModal';
-import FrameEdit from './components/FrameEdit';
-import GridEdit from './components/GridEdit';
-import ScreenplayWriter from './components/ScreenplayWriter';
-import { Slide, AspectRatioKey, TransitionStyle, COLOR_LABELS, SHOT_TYPES, PlaybackTrack } from './types';
-import { ASPECT_RATIOS, GRADIENT_PRESETS } from './constants';
-import { useAudio } from './useAudio';
-import { cn } from './utils/cn';
-import { db, handleFirestoreError, OperationType } from './lib/firebase';
+import UploadModal from '../shared/components/UploadModal';
+import FrameEdit from '../shared/components/FrameEdit';
+import GridEdit from '../shared/components/GridEdit';
+import ScreenplayWriter from '../shared/components/ScreenplayWriter';
+import { Slide, AspectRatioKey, TransitionStyle, COLOR_LABELS, SHOT_TYPES, PlaybackTrack } from '../shared/types';
+import { ASPECT_RATIOS, GRADIENT_PRESETS } from '../shared/constants';
+import { useAudio } from '../shared/useAudio';
+import { cn } from '../shared/utils/cn';
+import { db, getFirebaseStorage, handleFirestoreError, OperationType } from '../shared/lib/firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { resizeImage } from './utils/image';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { resizeImage } from '../shared/utils/image';
 
-const storage = getStorage();
 
 interface Theme {
   id: string;
@@ -666,20 +665,23 @@ export default function SxaBoardTool({
       slidesToSave = await Promise.all(newSlides.map(async (s) => {
         if (s.imageUrl.startsWith('data:image')) {
           if (processedImagesRef.current.has(s.imageUrl)) return s;
-          try {
-            const storageRef = ref(storage, `storyboards/${storyboardId}/${s.id}.jpg`);
-            await uploadString(storageRef, s.imageUrl, 'data_url');
-            const downloadUrl = await getDownloadURL(storageRef);
-            processedImagesRef.current.add(downloadUrl);
-            processedImagesRef.current.add(s.imageUrl);
-            return { ...s, imageUrl: downloadUrl };
-          } catch (storageErr) {
-            console.warn(storageErr);
-            const compressed = await resizeImage(s.imageUrl, 800, 450, 0.5);
-            processedImagesRef.current.add(compressed);
-            processedImagesRef.current.add(s.imageUrl);
-            return { ...s, imageUrl: compressed };
+          const storage = getFirebaseStorage();
+          if (storage) {
+            try {
+              const storageRef = ref(storage, `storyboards/${storyboardId}/${s.id}.jpg`);
+              await uploadString(storageRef, s.imageUrl, 'data_url');
+              const downloadUrl = await getDownloadURL(storageRef);
+              processedImagesRef.current.add(downloadUrl);
+              processedImagesRef.current.add(s.imageUrl);
+              return { ...s, imageUrl: downloadUrl };
+            } catch (storageErr) {
+              console.warn(storageErr);
+            }
           }
+          const compressed = await resizeImage(s.imageUrl, 800, 450, 0.5);
+          processedImagesRef.current.add(compressed);
+          processedImagesRef.current.add(s.imageUrl);
+          return { ...s, imageUrl: compressed };
         }
         return s;
       }));

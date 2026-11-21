@@ -15,6 +15,7 @@ import {
   Info,
   Rocket,
   Trash2,
+  ShieldAlert,
   ShieldCheck,
   RefreshCw,
   Copy,
@@ -45,8 +46,6 @@ interface StoredSettings {
   branch?: string;
   basePath?: string;
   message?: string;
-  token?: string;
-  rememberToken?: boolean;
   includeBuildOutput?: boolean;
 }
 
@@ -54,9 +53,29 @@ function loadSettings(): StoredSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
-    return JSON.parse(raw) as StoredSettings;
+    const parsed = JSON.parse(raw) as StoredSettings & { token?: string; rememberToken?: boolean };
+    // Drop any legacy token persisted by older versions so it cannot linger.
+    delete parsed.token;
+    delete parsed.rememberToken;
+    return parsed;
   } catch {
     return {};
+  }
+}
+
+/** One-time cleanup: purge any token a previous version wrote to localStorage. */
+function scrubLegacyToken() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as { token?: string; rememberToken?: boolean };
+    if (parsed.token || parsed.rememberToken) {
+      delete parsed.token;
+      delete parsed.rememberToken;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    }
+  } catch {
+    /* ignore */
   }
 }
 
@@ -97,8 +116,7 @@ export const GitHubPublisherTool: React.FC = () => {
   const [includeBuildOutput, setIncludeBuildOutput] = useState(Boolean(stored.includeBuildOutput));
   const [dragActive, setDragActive] = useState(false);
 
-  const [token, setToken] = useState(stored.rememberToken ? stored.token || '' : '');
-  const [rememberToken, setRememberToken] = useState(Boolean(stored.rememberToken));
+  const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
 
   const [repoSpec, setRepoSpec] = useState(stored.repoSpec || '');
@@ -133,6 +151,11 @@ export const GitHubPublisherTool: React.FC = () => {
 
   /* ------------------------------ persistence ----------------------------- */
 
+  // Scrub any legacy token written by older versions, once on mount.
+  useEffect(() => {
+    scrubLegacyToken();
+  }, []);
+
   useEffect(() => {
     const payload: StoredSettings = {
       repoSpec,
@@ -140,15 +163,13 @@ export const GitHubPublisherTool: React.FC = () => {
       basePath,
       message,
       includeBuildOutput,
-      rememberToken,
-      token: rememberToken ? token : '',
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
       /* storage may be unavailable — settings just won't persist */
     }
-  }, [repoSpec, branch, basePath, message, includeBuildOutput, rememberToken, token]);
+  }, [repoSpec, branch, basePath, message, includeBuildOutput]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: 'end' });
@@ -692,14 +713,8 @@ export const GitHubPublisherTool: React.FC = () => {
             </div>
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-              <label className="flex items-center gap-2 text-xs text-app-dim">
-                <input
-                  type="checkbox"
-                  checked={rememberToken}
-                  onChange={(event) => setRememberToken(event.target.checked)}
-                  className="h-3.5 w-3.5 accent-emerald-500"
-                />
-                Remember on this device (localStorage)
+              <label className="flex items-center gap-2 text-xs text-amber-400">
+                <ShieldAlert className="w-3.5 h-3.5" /> Token is kept in memory for this session only — it is never saved to localStorage.
               </label>
               <span className="flex items-center gap-1 text-[11px] text-app-dim">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Sent only to api.github.com
