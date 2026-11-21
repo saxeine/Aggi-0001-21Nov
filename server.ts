@@ -4,9 +4,14 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { createMaggiRouter } from './server/maggiRoutes';
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
+
+// MAGGI RAG engine routes (chat/embeddings/extraction). Mounted before Vite so
+// the dev middleware never swallows them.
+app.use('/api/maggi', createMaggiRouter());
 
 // Initialize Gemini
 const getAiClient = (req?: express.Request) => {

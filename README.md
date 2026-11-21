@@ -283,3 +283,17 @@ Unified provider-agnostic bridge used by interactive Creation Studio applets.
   - Added the shared `.checkerboard` transparency utility to `index.css`.
 
 - **Application infographic**: `docs/application-infographic.html` is a standalone, printable and searchable visual overview of the session workflow, suite launcher tools, AI routes and persistence. It is based on the current code snapshot; update its tool directory and caveats when the underlying architecture or launchers change.
+
+**Last Updated**: `2026-11-21 00:00:00+01:00`
+- **MAGGI — RAG engine rebuilt, with FreeLLMAPI as the brain**:
+  - New top-level engine (`services/maggi/`, `components/MaggiView.tsx`, `hooks/useMaggi.ts`, `server/maggiRoutes.ts`) reachable from the library header via the **🧠** button. Full design doc: [`aDOCS/MAGGI.md`](aDOCS/MAGGI.md).
+  - **Why**: the previous retrieval layer packed every session media item into one prompt (300k-char truncation) or a single Gemini context cache. That has no ranking, no citations and silently drops content. MAGGI replaces it with a real pipeline — extract → chunk → embed → index → hybrid retrieve → grounded generate → cite. The old path is untouched, so nothing regresses.
+  - **Ingest**: PDF (`pdf-parse`), DOCX (`mammoth`), HTML, CSV/JSON/MD/TXT, remote URLs (SSRF-guarded) and pasted notes, plus one-click *Import workspace* for the active session's sources.
+  - **Chunking**: structure-aware recursive splitter (paragraph → line → sentence → clause → word) with heading breadcrumbs, configurable size/overlap, content hashes and character offsets.
+  - **Retrieval**: hybrid **BM25 + dense vectors**, fused with **Reciprocal Rank Fusion**, plus optional **LLM re-ranking**, **MMR diversification**, **multi-query expansion**, **HyDE** and recency decay. Runs entirely in the browser; only the final context block leaves the machine.
+  - **Embeddings**: `text-embedding-004` when a Gemini key exists, `/v1/embeddings` when the brain is FreeLLMAPI, and a genuine offline fallback (hashed word/bigram/char-4-gram, signed hashing, L2-normalised) so the engine always works.
+  - **Brain**: **FreeLLMAPI** first-class (`/v1/chat/completions`, `model: auto`, `x-routed-via` surfaced in the UI), with OpenAI-compatible, Gemini and Ollama as alternatives behind one interface. Streaming SSE, connectivity probe and model discovery built in.
+  - **Answers**: numbered, citation-ready context (`[1] (report.pdf — Risks › Currency)`), strict/balanced grounding modes, inline `[n]` markers resolved back to exact chunks, clickable citations that jump to the passage, and a per-answer **Retrieval inspector** showing fused/semantic/lexical scores and pipeline traces.
+  - **Persistence**: IndexedDB index with localStorage fallback; incremental re-indexing by content hash means a reload never re-embeds and an unchanged file is a no-op.
+  - **Server**: `/api/maggi/{chat,chat-stream,embed,extract,probe,health}`, with env-first secret resolution (`FREELLMAPI_BASE_URL`, `FREELLMAPI_API_KEY`), timeouts on every upstream call and actionable error translation.
+  - **Tests**: `npm run test:maggi` — 42 offline assertions across tokenizer, chunker, BM25, embeddings, vector index, hybrid fusion, MMR, budget enforcement and citation assembly.
