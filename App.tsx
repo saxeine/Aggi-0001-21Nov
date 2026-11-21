@@ -25,6 +25,7 @@ import { useMIPrOMPTLibrary } from './hooks/useMIPrOMPTLibrary';
 import { useCastLibrary } from './hooks/useCastLibrary';
 import { useCharacterLibrary } from './hooks/useCharacterLibrary';
 import { generateResponse, generateSpeech, searchWeb, chunkText, base64ToText, translateText } from './services/gemini'; 
+import { generateUnifiedAIResponse } from './services/unifiedAi';
 import { saveAudioBlobToIDB, loadAudioBlobFromIDB } from './services/storage';
 import { getMaggiStore } from './services/maggi/store';
 import { DEFAULT_GEMINI_MODEL } from './constants/geminiModels';
@@ -903,8 +904,13 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
                     }
                 }
                 
-                if (action === 'summarize_translate') {
-                    // 1. Summarize the whole document first (Gemini 1.5 Flash handles 1M tokens)
+                if (settings.provider !== 'gemini') {
+                    const unifiedPrompt = action === 'summarize_translate'
+                      ? `Summarize the provided sources concisely and then translate that summary cleanly into ${lang}. Return ONLY the translated text.`
+                      : `Translate the following text cleanly into ${lang}. Return ONLY the translated text.\n\n${fullText}`;
+                    code = await generateUnifiedAIResponse(unifiedPrompt, activeMediaItems);
+                } else if (action === 'summarize_translate') {
+                    // 1. Summarize the whole document first
                     const summaryPrompt = `Provide a comprehensive summary of the provided text. Return ONLY the summary content.`;
                     const summaryResult = await generateResponse(summaryPrompt, [], activeMediaItems, model, cacheName);
                     // 2. Translate the summary (usually small enough for one go, but translateText handles chunks anyway)
@@ -937,18 +943,22 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
     </div>
 </body>
 </html>`;
+            } else if (settings.provider !== 'gemini') {
+                code = await generateUnifiedAIResponse(prompt, activeMediaItems);
             } else {
                 // Default summarization (one-shot)
                 const result = await generateResponse(prompt, [], activeMediaItems, model, cacheName);
                 code = result.text;
             }
+        } else if (settings.provider !== 'gemini') {
+            code = await generateUnifiedAIResponse(prompt, activeMediaItems);
         } else {
             const result = await generateResponse(prompt, [], activeMediaItems, model, cacheName, toolId === 'crypto_analyst');
             code = result.text;
         }
         if (isPodcast) {
             code = code.replace(/^```markdown\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
-            const rawText = code.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
+            const rawText = code.replace(/<[^>]*>?/gm, ' ').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
             const speechText = rawText.substring(0, 4000); 
             let speakers = 1;
             if (toolId === 'podcast_2') speakers = 2;
@@ -1049,13 +1059,42 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
         setIsPreviewMinimized(false); 
         if (isMindMapOpen) setIsMainPanelCollapsed(true);
      } catch (e: any) {
-         console.error("Tool generation failed", e);
-         const msg = e.message || String(e);
-         if (msg.includes('Quota') || msg.includes('429')) {
-             alert("API Quota Reached. We have tried retrying, but the limit is still active. Please wait 60 seconds before trying again.");
-         } else {
-             alert("Failed to generate content. " + (msg.length < 100 ? msg : "Check console for details."));
-         }
+         const msg = e?.message || String(e);
+         console.warn("Tool generation notice:", msg);
+         const isQuota = /quota|429|resource_exhausted/i.test(msg);
+         const safeMsg = msg
+           .replace(/&/g, '&amp;')
+           .replace(/</g, '&lt;')
+           .replace(/>/g, '&gt;');
+         const errorHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Generation Notice</title>
+  <style>
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #0b0f17; color: #e2e8f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
+    .card { max-width: 560px; width: 100%; background: #141a26; border: 1px solid ${isQuota ? '#f59e0b55' : '#ef444455'}; border-radius: 14px; padding: 22px; }
+    .badge { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 3px 8px; border-radius: 6px; background: ${isQuota ? '#f59e0b22' : '#ef444422'}; color: ${isQuota ? '#fbbf24' : '#f87171'}; margin-bottom: 10px; }
+    h2 { margin: 0 0 8px; font-size: 17px; color: #f8fafc; }
+    p { margin: 0 0 12px; font-size: 13px; line-height: 1.55; color: #cbd5e1; }
+    ul { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.65; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">${isQuota ? 'API Quota Limit' : 'Generation Error'}</div>
+    <h2>${isQuota ? 'Gemini API Quota Exceeded (429)' : 'Could Not Generate Tool Output'}</h2>
+    <p>${safeMsg}</p>
+    <ul>
+      <li>Open <b>Settings → AI Engine</b> and switch to <b>MAGGI</b> (FreeLLMAPI key pool), <b>Ollama</b>, or <b>Custom AI</b>.</li>
+      <li>Or wait a minute and retry, or select a billing-enabled API key in <b>Settings → Secrets</b>.</li>
+    </ul>
+  </div>
+</body>
+</html>`;
+         setPreviewCode(errorHtml);
+         setFocusedMediaItem(null);
+         setIsPreviewMinimized(false);
      } finally {
          setToolLoadingState(prev => ({ ...prev, [toolId]: false }));
      }
@@ -1087,7 +1126,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
       if (settings.autoTagSources && result.newItems) {
           autoTagMediaItems(result.targetId, result.newItems);
       }
-      alert(`"${title}" saved to session sources!`);
+      console.info(`"${title}" saved to session sources.`);
     }
   };
 

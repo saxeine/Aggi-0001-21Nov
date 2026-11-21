@@ -191,7 +191,7 @@ export const generateTagsForMedia = async (
     const tags = JSON.parse(text);
     return Array.isArray(tags) ? tags : [];
   } catch (e) {
-    console.error("Failed to generate tags", e);
+    console.warn("Tag generation skipped:", e instanceof Error ? e.message : String(e));
     return [];
   }
 };
@@ -280,7 +280,7 @@ export const updateCache = async (
     console.log("Created Gemini Context Cache:", cache.name);
     return { cacheName: cache.name, cacheHash: currentHash };
   } catch (e) {
-    console.error("Failed to create cache:", e);
+    console.warn("Context cache skipped:", e instanceof Error ? e.message : String(e));
     return { cacheName: undefined, cacheHash: '' };
   }
 };
@@ -340,7 +340,7 @@ export const generateResponse = async (
       groundingChunks: groundingChunks
     };
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    console.warn("Gemini API notice:", error instanceof Error ? error.message : String(error));
     throw error;
   }
 };
@@ -354,12 +354,91 @@ const cleanTextForSpeech = (text: string): string => {
     .replace(/(\*\*|__|\*|_)/g, '') // Strip Markdown formatting
     .replace(/#{1,6}\s/g, '')   // Strip Headers
     .replace(/\[.*?\]/g, '')    // Strip bracketed text like [Sound effect]
-    .replace(/\s+/g, ' ')       // Collapse whitespace
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')    // Collapse horizontal whitespace while keeping speaker newlines
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
+};
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildMultiSpeakerParts = (
+  cleanedText: string,
+  voices: VoiceSettings
+): Array<{ text: string; speechMetadata: { speaker: string } }> => {
+  const hostAliases = [voices.hostLabel, 'Host', 'SaxeIn'].filter(Boolean);
+  const expertAliases = [voices.expertLabel, 'Expert', voices.guestLabel, 'Guest'].filter(Boolean);
+
+  const labelMap = new Map<string, 'SaxeIn' | 'Expert'>();
+  hostAliases.forEach((a) => labelMap.set(a.toLowerCase(), 'SaxeIn'));
+  expertAliases.forEach((a) => {
+    const key = a.toLowerCase();
+    if (!labelMap.has(key)) labelMap.set(key, 'Expert');
+  });
+
+  const allAliases = Array.from(new Set([...hostAliases, ...expertAliases]))
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp);
+
+  if (allAliases.length === 0) return [];
+
+  // Match speaker markers either at line start or inline after whitespace/punctuation
+  const markerRegex = new RegExp(`(?:^|\\n|\\s)(${allAliases.join('|')})\\s*:`, 'gi');
+  const matches: Array<{ index: number; endIndex: number; speaker: 'SaxeIn' | 'Expert' }> = [];
+
+  let match: RegExpExecArray | null;
+  while ((match = markerRegex.exec(cleanedText)) !== null) {
+    const rawLabel = match[1].trim().toLowerCase();
+    const mapped = labelMap.get(rawLabel) || 'SaxeIn';
+    matches.push({
+      index: match.index,
+      endIndex: match.index + match[0].length,
+      speaker: mapped,
+    });
+  }
+
+  const parts: Array<{ text: string; speechMetadata: { speaker: 'SaxeIn' | 'Expert' } }> = [];
+  const pushTurn = (speaker: 'SaxeIn' | 'Expert', body: string) => {
+    const trimmed = body.replace(/\s+/g, ' ').trim();
+    if (!trimmed) return;
+    const prev = parts[parts.length - 1];
+    if (prev && prev.speechMetadata.speaker === speaker) {
+      prev.text = `${prev.text} ${trimmed}`;
+    } else {
+      parts.push({
+        text: `${speaker}: ${trimmed}`,
+        speechMetadata: { speaker },
+      });
+    }
+  };
+
+  if (matches.length > 0) {
+    // Include any opening narration before the first explicit speaker label
+    if (matches[0].index > 0) {
+      const intro = cleanedText.slice(0, matches[0].index).trim();
+      if (intro) pushTurn('SaxeIn', intro);
+    }
+    for (let i = 0; i < matches.length; i++) {
+      const start = matches[i].endIndex;
+      const end = i + 1 < matches.length ? matches[i + 1].index : cleanedText.length;
+      pushTurn(matches[i].speaker, cleanedText.slice(start, end));
+    }
+  } else {
+    // No explicit speaker labels found: alternate sentence chunks between SaxeIn & Expert
+    const sentences = cleanedText.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 0);
+    if (sentences.length >= 2) {
+      sentences.forEach((sentence, idx) => {
+        pushTurn(idx % 2 === 0 ? 'SaxeIn' : 'Expert', sentence);
+      });
+    }
+  }
+
+  return parts;
 };
 
 export const generateSpeech = async (text: string, speakers: number = 1, voiceSettings?: VoiceSettings): Promise<string | null> => {
   const cleanedText = cleanTextForSpeech(text);
+  if (!cleanedText) return null;
   
   const voices = voiceSettings || {
       host: 'Puck', hostLabel: 'Sax',
@@ -372,44 +451,40 @@ export const generateSpeech = async (text: string, speakers: number = 1, voiceSe
       responseModalities: ["AUDIO"],
     };
 
-    let promptText = cleanedText;
+    let ttsModel = speakers >= 2 ? "gemini-3.8-flash-tts" : "gemini-3.8-flash-lite-tts";
+    let requestParts: any[] = [];
 
-    if (speakers >= 2) {
+    const multiSpeakerParts = speakers >= 2 ? buildMultiSpeakerParts(cleanedText, voices) : [];
+
+    if (speakers >= 2 && multiSpeakerParts.length >= 2) {
         const speakerConfigs = [
             { speaker: 'SaxeIn', voiceConfig: { prebuiltVoiceConfig: { voiceName: voices.host } } },
             { speaker: 'Expert', voiceConfig: { prebuiltVoiceConfig: { voiceName: voices.expert } } }
         ];
-        
-        let processedText = cleanedText;
-        // Escape labels for regex
-        const hostEsc = voices.hostLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const expertEsc = voices.expertLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const guestEsc = voices.guestLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-        // Dynamic speaker mapping for TTS engine
-        processedText = processedText.replace(new RegExp(`(^|\\n)\\s*(${guestEsc})\\s*:`, 'gim'), '$1Expert:');
-        processedText = processedText.replace(new RegExp(`(^|\\n)\\s*(${hostEsc})\\s*:`, 'gim'), '$1SaxeIn:');
-        processedText = processedText.replace(new RegExp(`(^|\\n)\\s*(${expertEsc})\\s*:`, 'gim'), '$1Expert:');
 
         config.speechConfig = {
             multiSpeakerVoiceConfig: {
                 speakerVoiceConfigs: speakerConfigs
             }
         };
-        const langHint = voices.language === 'Swedish' ? 'in Swedish' : 'in English';
-        promptText = `TTS the following conversation ${langHint} between SaxeIn and Expert:\n${processedText}`;
+        requestParts = multiSpeakerParts;
     } else {
+        ttsModel = "gemini-3.8-flash-lite-tts";
         config.speechConfig = {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: voices.host } } 
         };
-        const hostEsc = voices.hostLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const hostEsc = escapeRegExp(voices.hostLabel || 'Host');
         const langHint = voices.language === 'Swedish' ? 'in Swedish' : 'in English';
-        promptText = `TTS the following content ${langHint}:\n${cleanedText.replace(new RegExp(`^${hostEsc}:\\s*`, 'gim'), '').replace(new RegExp(`\\n${hostEsc}:\\s*`, 'gim'), '\n')}`;
+        const singleSpeakerText = cleanedText
+          .replace(new RegExp(`(^|\\n)\\s*(${hostEsc}|Host|SaxeIn)\\s*:`, 'gim'), '$1')
+          .replace(/\s+/g, ' ')
+          .trim();
+        requestParts = [{ text: `TTS the following content ${langHint}:\n${singleSpeakerText}` }];
     }
 
     const response = await callGeminiApi('generate', {
-        model: "gemini-3.8-flash-tts",
-        contents: [{ parts: [{ text: promptText }] }],
+        model: ttsModel,
+        contents: [{ role: 'user', parts: requestParts }],
         config: config
     });
 
@@ -427,6 +502,13 @@ export const generateSpeech = async (text: string, speakers: number = 1, voiceSe
         const len = binaryString.length;
         const bytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+
+        // Gemini 3.8 unary TTS returns a complete RIFF WAV file; only wrap if raw PCM
+        const isWav = bytes.length >= 4 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46;
+        if (isWav) {
+            return audioBase64;
+        }
+
         const wavBytes = addWavHeader(bytes);
         let binary = '';
         for (let i = 0; i < wavBytes.byteLength; i++) binary += String.fromCharCode(wavBytes[i]);
@@ -434,7 +516,7 @@ export const generateSpeech = async (text: string, speakers: number = 1, voiceSe
     }
     return null;
   } catch (e) {
-    console.error("Speech generation failed", e);
+    console.warn("Speech generation skipped:", e instanceof Error ? e.message : String(e));
     return null;
   }
 };
@@ -469,7 +551,7 @@ export const generateSuggestions = async (mediaItems: MediaItem[], modelName: st
             .map(l => l.replace(/^[\d-][\.\)]\s*/, '')) 
             .slice(0, 3);
      } catch (error) {
-        console.error("Link Suggestion Error:", error);
+        console.warn("Link suggestions skipped:", error instanceof Error ? error.message : String(error));
         return ["Tell me about the links."];
     }
   } else {
@@ -494,7 +576,7 @@ export const generateSuggestions = async (mediaItems: MediaItem[], modelName: st
         const json = JSON.parse(safeExtractText(response) || '{"questions": []}');
         return json.questions.slice(0, 3) || [];
     } catch (error) {
-        console.error("Suggestion Generation Error:", error);
+        console.warn("Suggestions skipped:", error instanceof Error ? error.message : String(error));
         return ["Tell me about the uploaded files."];
     }
   }
@@ -534,7 +616,7 @@ export const generateMindMapJson = async (mediaItems: MediaItem[], modelName: st
         if (json.label) return json as MindMapNode;
         return null;
     } catch (error) {
-        console.error("MindMap Generation Error", error);
+        console.warn("MindMap generation skipped:", error instanceof Error ? error.message : String(error));
         return null;
     }
 };
@@ -563,7 +645,7 @@ export const searchWeb = async (query: string, excludeUrls: string[] = []): Prom
     results.forEach(r => unique.set(r.uri, r));
     return Array.from(unique.values()).slice(0, 5);
   } catch (e) {
-    console.error("Web Search failed", e);
+    console.warn("Web Search skipped:", e instanceof Error ? e.message : String(e));
     return [];
   }
 };
@@ -581,7 +663,7 @@ export const bringToLife = async (
     const data = await callGeminiApi('bring-to-life', { prompt, imageBase64, mimeType, modelName });
     return data.html || "";
   } catch (e) {
-    console.error("Bring To Life failed:", e);
+    console.warn("Bring To Life notice:", e instanceof Error ? e.message : String(e));
     throw e;
   }
 };
@@ -613,7 +695,7 @@ export const transcribeAudio = async (base64Data: string, mimeType: string): Pro
     
     return safeExtractText(response).trim();
   } catch (error) {
-    console.error("Audio transcription failed:", error);
+    console.warn("Audio transcription notice:", error instanceof Error ? error.message : String(error));
     throw error;
   }
 };

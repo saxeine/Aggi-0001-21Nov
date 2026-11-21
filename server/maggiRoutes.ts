@@ -757,6 +757,7 @@ export const createMaggiRouter = (): Router => {
               'Content-Type': 'application/json',
               'User-Agent': 'aggrigator-ollama-proxy/1.0',
               'ngrok-skip-browser-warning': 'true',
+              'bypass-tunnel-reminder': 'true',
             },
             body: JSON.stringify({
               model: model || 'llama3',
@@ -1032,6 +1033,7 @@ export const createMaggiRouter = (): Router => {
           headers: {
             'User-Agent': 'aggrigator-ollama-proxy/1.0',
             'ngrok-skip-browser-warning': 'true',
+            'bypass-tunnel-reminder': 'true',
             Accept: 'application/json',
           },
           redirect: 'manual',

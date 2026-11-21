@@ -642,10 +642,22 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <div className="space-y-3 animate-pulse-fast-once">
                       {showMixedContentWarning && (
                         <div className="bg-amber-950/30 border border-amber-500/40 p-2.5 rounded-lg text-[10px] text-amber-200 space-y-1.5">
-                          <p className="font-bold text-amber-300">⚠️ Local HTTP Endpoint on HTTPS Preview</p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-bold text-amber-300">⚠️ Local HTTP on HTTPS Preview</p>
+                            {typeof window !== 'undefined' && window.self !== window.top && (
+                              <a
+                                href={window.location.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold transition-colors"
+                              >
+                                Open in New Tab ↗
+                              </a>
+                            )}
+                          </div>
                           <p>
-                            Browsers usually block <b>HTTPS</b> pages from calling local <b>HTTP</b> (`localhost:11434`).
-                            Expose Ollama via a Cloudflare Tunnel — our backend proxies it automatically (no CORS flags needed):
+                            Browsers inside an HTTPS preview iframe block <code>http://localhost:11434</code>.
+                            Run a tunnel on your PC — our backend proxies it automatically (no CORS flags needed):
                           </p>
                           <div className="flex items-center gap-1.5 bg-black/40 p-1.5 rounded border border-amber-500/20">
                             <code className="flex-1 text-amber-300 overflow-x-auto whitespace-nowrap">

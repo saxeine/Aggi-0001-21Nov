@@ -92,6 +92,7 @@ app.post('/api/ollama/probe', async (req, res) => {
       headers: {
         'User-Agent': 'aggrigator-ollama-proxy/1.0',
         'ngrok-skip-browser-warning': 'true',
+        'bypass-tunnel-reminder': 'true',
         Accept: 'application/json',
       },
       redirect: 'manual',
@@ -175,6 +176,7 @@ app.post('/api/ollama/chat', async (req, res) => {
         'Content-Type': 'application/json',
         'User-Agent': 'aggrigator-ollama-proxy/1.0',
         'ngrok-skip-browser-warning': 'true',
+        'bypass-tunnel-reminder': 'true',
       },
       body: JSON.stringify({ model, messages, stream: !!stream }),
       redirect: 'manual',
@@ -278,11 +280,11 @@ const formatGeminiError = (error: any) => {
   }
 
   if (msg.includes("GenerateRequestsPerDay") || msg.includes("free_tier_requests") || msg.includes("Daily quota")) {
-    return 'Gemini API Daily Quota Exceeded. You have exceeded your daily requests limit. You can add your own Gemini API key in Settings.';
+    return 'Gemini API Daily Quota Exceeded. Wait a moment, try a lower-quota model, select a billing-enabled API key in Settings > Secrets, or switch AI Engine to MAGGI / Ollama in Settings.';
   }
   
   if (msg.toLowerCase().includes('quota') || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
-    return 'Gemini API Quota Exceeded (429 Resource Exhausted). The free tier rate limit was reached. Please wait a moment or configure your custom Gemini API key in Settings.';
+    return 'Gemini API Quota Exceeded (429 Resource Exhausted). If you are using a free tier or paid-only model, select a billing-enabled API key in Settings > Secrets, wait a moment, or switch AI Engine to MAGGI / Ollama in Settings.';
   }
 
   if (msg.includes('503') || msg.includes('Service Unavailable') || msg.includes('DeadlineExceeded')) {
@@ -361,17 +363,20 @@ const callWithRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000)
       }
     }
 
-    // Check if the message indicates a permanent daily limit
-    const isDailyQuotaExceeded = msg.includes("GenerateRequestsPerDay") || 
-                                 msg.includes("free_tier_requests") || 
-                                 msg.includes("limit: 20");
+    // Check if the message indicates a non-transient quota/billing limit
+    const isHardQuotaExceeded = msg.includes("GenerateRequestsPerDay") ||
+                                 msg.includes("free_tier_requests") ||
+                                 msg.includes("exceeded your current quota") ||
+                                 msg.includes("check your plan and billing details") ||
+                                 msg.includes("limit: 20") ||
+                                 msg.includes("limit: 0");
 
-    if (isDailyQuotaExceeded) {
-      console.log("[Status] Daily request limit reached. Halting retry.");
+    if (isHardQuotaExceeded) {
+      console.log("[Status] Gemini quota exhausted — skipping retries.");
       throw error;
     }
     
-    // We retry on rate limits (429) AND service overloaded (503)
+    // We retry on transient rate limits (429) AND service overloaded (503/500)
     const isRetriable = msg.includes("429") || 
                          msg.includes("RESOURCE_EXHAUSTED") || 
                          msg.includes("quota") ||
@@ -383,7 +388,7 @@ const callWithRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000)
                          msg.includes("Internal error");
 
     if (retries > 0 && isRetriable) {
-      console.log(`[Status] Request deferred (${msg.substring(0, 50)}...). Scheduling re-attempt in ${retryDelay}ms... (${retries} attempts remaining)`);
+      console.log(`[Status] Request deferred (${msg.substring(0, 50)}...). Retrying in ${Math.round(retryDelay)}ms... (${retries} remaining)`);
       await new Promise(res => setTimeout(res, retryDelay));
       const nextDelay = retryDelay * 1.5 + Math.random() * 1000;
       return callWithRetry(fn, retries - 1, nextDelay); 
@@ -392,7 +397,7 @@ const callWithRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000)
   }
 };
 
-// Robust Generate Content helper with multi-model fallback for high-availability
+// Robust Generate Content helper with valid-model fallback
 const generateContentWithFallback = async (
   ai: ReturnType<typeof getAiClient>,
   params: any,
@@ -406,6 +411,14 @@ const generateContentWithFallback = async (
     }, retries, delay));
   } catch (error: any) {
     const msg = error.message || JSON.stringify(error) || "";
+    const isPaidOnlyModel = ['gemini-4-neon', 'gemini-4-argon', 'gemini-4-carbon'].includes(String(originalModel).toLowerCase());
+    const isHardBillingQuota = msg.includes("exceeded your current quota") || msg.includes("check your plan and billing details");
+
+    // If the account/project quota itself is exhausted on a free-tier model, fail fast instead of cascading retries
+    if (isHardBillingQuota && !isPaidOnlyModel) {
+      throw error;
+    }
+
     const isServiceIssue = msg.includes("503") || 
                            msg.includes("UNAVAILABLE") || 
                            msg.includes("overloaded") || 
@@ -417,18 +430,30 @@ const generateContentWithFallback = async (
                            msg.includes("429") ||
                            msg.includes("RESOURCE_EXHAUSTED") ||
                            msg.includes("quota") ||
-                           msg.includes("QuotaExceeded");
+                           msg.includes("QuotaExceeded") ||
+                           msg.includes("404") ||
+                           msg.includes("NOT_FOUND");
 
     if (isServiceIssue) {
-      const fallbackCandidates = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-preview-12-2025'];
+      const normOriginal = String(originalModel).toLowerCase();
+      const isTtsRequest = normOriginal.includes('-tts')
+        || Boolean(params?.config?.speechConfig)
+        || (Array.isArray(params?.config?.responseModalities)
+          && params.config.responseModalities.some((m: any) => String(m).toUpperCase() === 'AUDIO'));
+      const isMultiSpeakerTts = Boolean(params?.config?.speechConfig?.multiSpeakerVoiceConfig);
+
+      const fallbackCandidates = isTtsRequest
+        ? (isMultiSpeakerTts ? ['gemini-3.8-flash-tts'] : ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'])
+        : ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+
       for (const fallbackModel of fallbackCandidates) {
         if (fallbackModel !== originalModel) {
-          console.log(`[Routing] Primary model ${originalModel} had issue (${msg.substring(0, 40)}...). Trying fallback ${fallbackModel}...`);
+          console.log(`[Routing] Model ${originalModel} failed (${msg.substring(0, 40)}...). Trying fallback ${fallbackModel}...`);
           try {
             const fallbackParams = sanitizeGeminiParams({ ...params, model: fallbackModel });
             return await runInQueue(async () => await ai.models.generateContent(fallbackParams));
           } catch (fbErr: any) {
-            console.log(`[Routing] Fallback model ${fallbackModel} failed: ${fbErr.message || fbErr}`);
+            console.log(`[Routing] Fallback model ${fallbackModel} unavailable: ${formatGeminiError(fbErr)}`);
           }
         }
       }
@@ -437,27 +462,72 @@ const generateContentWithFallback = async (
   }
 };
 
-// Strip parameters unsupported by Gemini 4 models (temperature, topP, topK, candidateCount, thinkingBudget)
+// Sanitize per-model parameters & route TTS/preview/image calls through v1beta (speechConfig is v1beta-only)
 const sanitizeGeminiParams = (params: any): any => {
   if (!params || typeof params !== 'object') return params;
   const model = String(params.model || '').toLowerCase();
-  if (!model.startsWith('gemini-4-') || !params.config || typeof params.config !== 'object') {
+  const baseConfig = (params.config && typeof params.config === 'object') ? params.config : {};
+
+  const isTtsModel = model.includes('-tts');
+  const isLiveModel = model.includes('-live');
+  const hasSpeechConfig = Boolean(baseConfig.speechConfig);
+  const hasAudioModality = Array.isArray(baseConfig.responseModalities)
+    && baseConfig.responseModalities.some((m: any) => String(m).toUpperCase() === 'AUDIO');
+
+  const needsV1Beta = isTtsModel
+    || isLiveModel
+    || hasSpeechConfig
+    || hasAudioModality
+    || model.includes('-image')
+    || model.includes('nano-banana')
+    || model.includes('preview');
+
+  if (!params.config && !needsV1Beta) {
     return params;
   }
-  const nextConfig = { ...params.config };
-  delete nextConfig.temperature;
-  delete nextConfig.topP;
-  delete nextConfig.topK;
-  delete nextConfig.candidateCount;
-  if (nextConfig.thinkingConfig && typeof nextConfig.thinkingConfig === 'object') {
-    const tc = { ...nextConfig.thinkingConfig };
-    delete tc.thinkingBudget;
-    if (Object.keys(tc).length === 0) {
-      delete nextConfig.thinkingConfig;
-    } else {
-      nextConfig.thinkingConfig = tc;
+
+  const nextConfig: any = { ...baseConfig };
+
+  // Never forward speechConfig or AUDIO response modality to text-only models
+  if (!isTtsModel && !isLiveModel) {
+    delete nextConfig.speechConfig;
+    if (Array.isArray(nextConfig.responseModalities)) {
+      const filtered = nextConfig.responseModalities.filter(
+        (m: any) => String(m).toUpperCase() !== 'AUDIO'
+      );
+      if (filtered.length > 0) {
+        nextConfig.responseModalities = filtered;
+      } else {
+        delete nextConfig.responseModalities;
+      }
     }
   }
+
+  // @google/genai v3 defaults to v1, where generation_config.speechConfig is unavailable; use v1beta
+  if (needsV1Beta) {
+    nextConfig.httpOptions = {
+      apiVersion: 'v1beta',
+      ...(nextConfig.httpOptions && typeof nextConfig.httpOptions === 'object' ? nextConfig.httpOptions : {}),
+    };
+  }
+
+  // Strip parameters unsupported by Gemini 4 models
+  if (model.startsWith('gemini-4-')) {
+    delete nextConfig.temperature;
+    delete nextConfig.topP;
+    delete nextConfig.topK;
+    delete nextConfig.candidateCount;
+    if (nextConfig.thinkingConfig && typeof nextConfig.thinkingConfig === 'object') {
+      const tc = { ...nextConfig.thinkingConfig };
+      delete tc.thinkingBudget;
+      if (Object.keys(tc).length === 0) {
+        delete nextConfig.thinkingConfig;
+      } else {
+        nextConfig.thinkingConfig = tc;
+      }
+    }
+  }
+
   return { ...params, config: nextConfig };
 };
 
@@ -475,7 +545,6 @@ const normalizeModel = (model: string): string => {
     norm === 'gemini-4-carbon' ||
     norm === 'gemini-3.1-flash-lite' ||
     norm === 'gemini-3.1-pro-preview' ||
-    norm === 'gemini-2.5-flash-preview-12-2025' ||
     norm.includes('-tts') ||
     norm.includes('-image') ||
     norm.includes('nano-banana') ||
@@ -750,14 +819,19 @@ app.post('/api/gemini/generate', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     res.json(jsonResponse);
   } catch (error: any) {
-    console.error('Gemini Generate Error:', error);
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    const formatted = formatGeminiError(error);
     const isQuota = String(error.message || '').includes('quota') || 
                     String(error.message || '').includes('429') || 
                     String(error.message || '').includes('RESOURCE_EXHAUSTED');
+    if (isQuota) {
+      console.log('[Gemini Generate] 429 quota limit:', formatted);
+    } else {
+      console.warn('[Gemini Generate] Error:', formatted);
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
     res.status(error.message?.includes('API key not valid') ? 401 : isQuota ? 429 : 500).json({ 
-      error: formatGeminiError(error),
+      error: formatted,
       code: isQuota ? 'QUOTA_EXCEEDED' : 'GENERATE_ERROR'
     });
   }

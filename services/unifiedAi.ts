@@ -7,11 +7,13 @@ import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
 import { MediaItem } from '../types';
 
 export const generateUnifiedAIResponse = async (prompt: string, mediaItems: MediaItem[] = []): Promise<string> => {
+  let provider = 'gemini';
   try {
     const saved = localStorage.getItem('gemini_media_aggregator_settings');
     if (saved) {
       const settings = JSON.parse(saved);
-      if (settings.provider === 'maggi') {
+      provider = settings.provider || 'gemini';
+      if (provider === 'maggi') {
         const store = getMaggiStore();
         await store.hydrate();
         if (settings.maggiAutoIndexSession !== false && mediaItems.length > 0) {
@@ -32,7 +34,7 @@ export const generateUnifiedAIResponse = async (prompt: string, mediaItems: Medi
         const brain = createBrain(store.getSettings());
         const completion = await brain.complete([{ role: 'user', content: prompt }]);
         return completion.text;
-      } else if (settings.provider === 'ollama') {
+      } else if (provider === 'ollama') {
         let fullText = "";
         const generator = generateOllamaResponse(
           settings.ollamaEndpoint || 'http://localhost:11434',
@@ -45,7 +47,7 @@ export const generateUnifiedAIResponse = async (prompt: string, mediaItems: Medi
           fullText += chunk;
         }
         return fullText;
-      } else if (settings.provider === 'custom') {
+      } else if (provider === 'custom') {
         const result = await generateCustomAIResponse(
           settings.customBaseUrl || 'https://api.openai.com',
           settings.customApiKey || '',
@@ -63,7 +65,10 @@ export const generateUnifiedAIResponse = async (prompt: string, mediaItems: Medi
       }
     }
   } catch (e) {
-    console.warn("Unified AI response custom/ollama/maggi failed, falling back to Gemini:", e);
+    if (provider !== 'gemini') {
+      throw e;
+    }
+    console.warn("Unified AI settings read failed, using default Gemini:", e);
   }
 
   // Fallback to default Gemini

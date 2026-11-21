@@ -115,15 +115,21 @@ const normaliseModelList = (rawModels: unknown): OllamaModel[] => {
     .filter((m) => Boolean(m.name));
 };
 
-const buildMixedContentHelp = (endpoint: string): string =>
-  "**Ollama Connection Failed (Mixed Content / Local Loopback Blocked)**\n\n" +
-  `This app is running on **HTTPS**, and the browser blocked direct access to \`${endpoint}\`.\n\n` +
-  "**Recommended Fix — Cloudflare Tunnel (no CORS flags needed):**\n" +
-  "1. Install `cloudflared` on your computer.\n" +
-  "2. Run: `cloudflared tunnel --url http://localhost:11434`\n" +
-  "3. Copy the `https://....trycloudflare.com` URL.\n" +
-  "4. Paste it above and click **Test Connection**.\n\n" +
-  "*Alternative (desktop Chrome/Edge without iframe restrictions): restart Ollama with `OLLAMA_ORIGINS=\"*\" ollama serve` and use `http://127.0.0.1:11434`.*";
+const buildMixedContentHelp = (endpoint: string): string => {
+  const inIframe = typeof window !== 'undefined' && window.self !== window.top;
+  return (
+    "**Ollama Connection Failed (Mixed Content / Local Loopback Blocked)**\n\n" +
+    (inIframe
+      ? `This app is running on **HTTPS inside an iframe**, so the browser blocks direct requests to local HTTP (\`${endpoint}\`) and the cloud server cannot reach your machine's localhost.\n\n`
+      : `This app is running on **HTTPS**, and the browser blocked direct access to \`${endpoint}\`.\n\n`) +
+    "**Fix 1 — HTTPS Tunnel (works inside preview, no CORS flags needed):**\n" +
+    "1. Install `cloudflared` (or `ngrok`).\n" +
+    "2. Run: `cloudflared tunnel --url http://localhost:11434`\n" +
+    "3. Paste the `https://....trycloudflare.com` URL above and click **Test Connection**.\n\n" +
+    "**Fix 2 — Open outside iframe (Chrome/Edge):**\n" +
+    "Start Ollama with `OLLAMA_ORIGINS=\"*\" ollama serve`, open the app in a **New Tab**, and use `http://127.0.0.1:11434`."
+  );
+};
 
 async function browserDirectFetch(
   baseUrl: string,
@@ -134,15 +140,18 @@ async function browserDirectFetch(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  const isNgrok = baseUrl.toLowerCase().includes('ngrok');
+  const mergedHeaders: Record<string, string> = {
+    ...(isNgrok ? { 'ngrok-skip-browser-warning': 'true' } : {}),
+    ...((options.headers as Record<string, string>) || {}),
+  };
+
   const fetchOptions: RequestInit = {
     ...options,
     signal: controller.signal,
     mode: 'cors',
     referrerPolicy: 'no-referrer',
-    headers: {
-      'ngrok-skip-browser-warning': 'true',
-      ...(options.headers || {}),
-    },
+    ...(Object.keys(mergedHeaders).length > 0 ? { headers: mergedHeaders } : {}),
   };
 
   try {

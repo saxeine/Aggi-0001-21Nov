@@ -159,6 +159,7 @@ export const useThemeEngine = () => {
                   parsed.model === 'gemini-3.8-flash' ||
                   parsed.model === 'gemini-3.5-flash' ||
                   parsed.model === 'gemini-2.5-flash' ||
+                  parsed.model === 'gemini-2.5-flash-preview-12-2025' ||
                   parsed.model.startsWith('gemini-2.0-') ||
                   parsed.model.startsWith('gemini-1.')
                 ) {

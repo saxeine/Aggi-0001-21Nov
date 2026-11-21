@@ -57,13 +57,6 @@ export const GEMINI_MODELS: GeminiModelOption[] = [
     tier: 'preview',
     description: 'Preview Pro model for general complex text and reasoning workloads.',
   },
-  {
-    id: 'gemini-2.5-flash-preview-12-2025',
-    name: 'Gemini 2.5 Flash (Preview 12-2025)',
-    shortLabel: 'Flash 2.5 Preview',
-    tier: 'preview',
-    description: 'Dated Flash 2.5 preview release for backwards-compatible generation.',
-  },
 ];
 
 export const PAID_GEMINI_MODEL_IDS = new Set([
@@ -97,8 +90,11 @@ export const normalizeGeminiModelId = (model?: string): string => {
   const trimmed = model.trim();
   const norm = trimmed.toLowerCase();
 
-  if (norm === 'gemini-2.5-flash-preview-12-2025' || norm === 'gemini-3.1-pro-preview') {
+  if (norm === 'gemini-3.1-pro-preview') {
     return norm;
+  }
+  if (norm === 'gemini-2.5-flash-preview-12-2025') {
+    return DEFAULT_GEMINI_MODEL;
   }
   if (norm === 'gemini-4-hydrogen' || norm === 'gemini-4-neon' || norm === 'gemini-4-argon' || norm === 'gemini-4-carbon') {
     return norm;
