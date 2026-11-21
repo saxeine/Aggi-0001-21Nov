@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Generated git bundle used to publish to a fresh repo (aDOCS/PUBLISH-MAGGI.md)
+*.bundle

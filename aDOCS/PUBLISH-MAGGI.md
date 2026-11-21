@@ -5,12 +5,21 @@ ones** (`403 Resource not accessible by integration` on both `gh repo create`
 and `POST /user/repos`). Everything else is ready: a full commit exists in a
 git bundle at the repository root.
 
-- Bundle: `maggi-repo.bundle` (1.5 MB, complete history, branch `main`)
+- Bundle: regenerate any time with `git bundle create maggi-repo.bundle --all` (see step 0 below)
 - Commit: `9b52c44` — *MAGGI: grounded RAG engine with FreeLLMAPI brain*
 - Contains: all app code + MAGGI, excluding `node_modules`, `dist`, `.env`
 - Visibility chose: **private** · Name chose: **MAGGI**
 
 ---
+
+## Step 0 — regenerate the bundle (excluded from the repo)
+
+The bundle is a build artifact and is git-ignored. Recreate it when needed:
+
+```bash
+cd /home/user/Aggi-0001-01Nov
+git bundle create /tmp/maggi-repo.bundle --all
+```
 
 ## Option A — create it in the GitHub UI, then push (fastest)
 
