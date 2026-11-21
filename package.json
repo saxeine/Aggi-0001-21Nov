@@ -7,7 +7,10 @@
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:maggi": "tsx scripts/maggi-selftest.ts && tsx scripts/maggi-integration.ts",
+    "test:maggi:unit": "tsx scripts/maggi-selftest.ts",
+    "test:maggi:e2e": "tsx scripts/maggi-integration.ts"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
@@ -24,6 +27,7 @@
     "lucide-react": "^1.16.0",
     "mammoth": "1.6.0",
     "motion": "^12.38.0",
+    "pdf-parse": "^2.4.5",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-image-crop": "^11.1.2",

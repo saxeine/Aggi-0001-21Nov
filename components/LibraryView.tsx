@@ -19,6 +19,7 @@ interface LibraryViewProps {
   onOpenMedia?: () => void;
   onOpenMIPrOMPT?: () => void;
   onOpenFinance?: () => void;
+  onOpenMaggi?: () => void;
 }
 
 const LibraryView: React.FC<LibraryViewProps> = ({ 
@@ -34,7 +35,8 @@ const LibraryView: React.FC<LibraryViewProps> = ({
   onOpenOfficeTools,
   onOpenMedia,
   onOpenMIPrOMPT,
-  onOpenFinance
+  onOpenFinance,
+  onOpenMaggi
 }) => {
   const { t } = useLanguage();
   const [viewMode, setViewMode] = useState<'grid' | 'list' | 'icon'>('grid');
@@ -362,6 +364,15 @@ const LibraryView: React.FC<LibraryViewProps> = ({
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                     </svg>
+                </button>
+            )}
+            {onOpenMaggi && (
+                <button
+                    onClick={onOpenMaggi}
+                    className="p-2 bg-gradient-to-r from-lime-500 to-emerald-600 hover:from-lime-400 hover:to-emerald-500 text-black rounded-lg transition-all shadow-lg shadow-emerald-500/30 flex items-center justify-center font-black text-xs"
+                    title="MAGGI — RAG research engine"
+                >
+                    🧠
                 </button>
             )}
             {onOpenSettings && (

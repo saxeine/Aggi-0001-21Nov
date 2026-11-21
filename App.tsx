@@ -14,6 +14,7 @@ import OfficeTools from './components/OfficeTools';
 import { MediaSuiteView } from './components/MediaSuiteView';
 import MIPrOMPTLibraryView from './components/MIPrOMPTLibraryView';
 import { FinanceView } from './components/FinanceView';
+import MaggiView from './components/MaggiView';
 import SxaBoardApp from './src/media_suite/SxaBoardTool/App';
 import { MediaItem, VoiceSettings, PromptTemplate, CastMember, MIPrOMPTItem } from './types';
 import { useThemeEngine } from './hooks/useThemeEngine';
@@ -61,7 +62,7 @@ const App: React.FC = () => {
   } = useSessionManager();
 
   // Layout State
-  const [viewMode, setViewMode] = useState<'library' | 'workspace' | 'studio' | 'miprompt' | 'finance' | 'media' | 'office_tools' | 'sxa_board'>('library');
+  const [viewMode, setViewMode] = useState<'library' | 'workspace' | 'studio' | 'miprompt' | 'finance' | 'media' | 'office_tools' | 'sxa_board' | 'maggi'>('library');
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [lastUsedBuilder, setLastUsedBuilder] = useState<MIPrOMPTItem['type'] | null>(null);
   const [generatedAudio, setGeneratedAudio] = useState<string | null>(null);
@@ -1461,6 +1462,24 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
       );
   }
 
+  if (viewMode === 'maggi') {
+      return (
+          <div className="h-full w-full relative" data-theme={theme}>
+              <MaggiView
+                  onBack={() => setViewMode('library')}
+                  workspaceName={activeSession?.name}
+                  workspaceItems={(activeSession?.mediaItems ?? []).map((m) => ({
+                      id: m.id,
+                      name: m.name,
+                      type: m.type,
+                      mimeType: m.mimeType,
+                      data: m.data,
+                  }))}
+              />
+          </div>
+      );
+  }
+
   if (viewMode === 'finance') {
       return (
           <FinanceView onBack={() => setViewMode('library')} />
@@ -1509,6 +1528,7 @@ ${payload?.instruction ? `\nUSER SPECIFIC INSTRUCTIONS:\n${payload.instruction}\
                   onOpenMedia={() => setViewMode('media')}
                   onOpenMIPrOMPT={() => setViewMode('miprompt')}
                   onOpenFinance={() => setViewMode('finance')}
+                  onOpenMaggi={() => setViewMode('maggi')}
               />
               <SessionModal 
                   isOpen={isModalOpen} 
